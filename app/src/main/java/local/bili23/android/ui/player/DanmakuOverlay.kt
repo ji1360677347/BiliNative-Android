@@ -62,7 +62,9 @@ fun DanmakuOverlay(
             val width = size.width.toFloat()
             val height = size.height.toFloat()
             val laneHeight = max(textSizePx * 1.55f, 1f)
-            val lanes = (height * area.coerceIn(0.2f, 1f) / laneHeight).toInt().coerceAtLeast(1)
+            val topOffset = textSizePx * 1.6f
+            val lanes = ((height - topOffset) * area.coerceIn(0.2f, 1f) / laneHeight)
+                .toInt().coerceAtLeast(1)
             val scrollFree = DoubleArray(lanes)
             val topFree = DoubleArray(lanes)
             val bottomFree = DoubleArray(lanes)
@@ -118,6 +120,7 @@ fun DanmakuOverlay(
         val height = size.height.toFloat()
         if (width <= 0f || placements.isEmpty()) return@Canvas
         val laneHeight = max(textSizePx * 1.55f, 1f)
+        val topOffset = textSizePx * 1.6f
         val position = positionProvider() / 1000.0
         val textAlpha = (255 * opacity.coerceIn(0.1f, 1f)).toInt()
         for (p in placements) {
@@ -130,7 +133,7 @@ fun DanmakuOverlay(
                     paint.color = p.danmaku.color or 0xFF000000.toInt()
                     paint.alpha = textAlpha
                     val x = (width - (elapsed / SCROLL_SECONDS) * (width + p.width)).toFloat()
-                    val y = (p.lane + 1) * laneHeight - paint.descent()
+                    val y = topOffset + (p.lane + 1) * laneHeight - paint.descent()
                     drawContext.canvas.nativeCanvas.drawText(p.danmaku.text, x, y, paint)
                 }
                 4, 5 -> {
@@ -140,7 +143,7 @@ fun DanmakuOverlay(
                     paint.alpha = textAlpha
                     val x = (width - p.width) / 2f
                     val y = if (p.mode == 5) {
-                        (p.lane + 1) * laneHeight - paint.descent()
+                        topOffset + (p.lane + 1) * laneHeight - paint.descent()
                     } else {
                         height - p.lane * laneHeight - paint.descent()
                     }

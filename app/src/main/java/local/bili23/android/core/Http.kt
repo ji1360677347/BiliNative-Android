@@ -46,12 +46,15 @@ object Http {
             .url(url)
             .header("User-Agent", UA)
             .header("Referer", referer)
-            .header("Accept", "*/*")
+            .header("Origin", "https://www.bilibili.com")
+            .header("Accept", "application/json, text/plain, */*")
+            .header("Accept-Language", "zh-CN,zh;q=0.9")
         if (cookie.isNotBlank()) builder.header("Cookie", cookie)
         client.newCall(builder.build()).execute().use { response ->
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
-                throw BiliException("网络请求失败（HTTP ${response.code}）")
+                val hint = body.replace(Regex("\\s+"), " ").take(140)
+                throw BiliException("网络请求失败（HTTP ${response.code}）${hint}")
             }
             body
         }

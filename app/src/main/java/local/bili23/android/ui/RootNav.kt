@@ -134,14 +134,14 @@ fun RootNav(pendingVideoId: String?, onPendingConsumed: () -> Unit) {
                 arguments = listOf(
                     navArgument("id") { type = NavType.StringType },
                     navArgument("cid") {
-                        type = NavType.IntType
-                        defaultValue = 0
+                        type = NavType.StringType
+                        defaultValue = "0"
                     },
                 ),
             ) { entry ->
                 PlayerScreen(
                     videoId = entry.arguments?.getString("id").orEmpty(),
-                    initialCid = entry.arguments?.getInt("cid") ?: 0,
+                    initialCid = entry.arguments?.getString("cid")?.toLongOrNull() ?: 0L,
                     onBack = { nav.popBackStack() },
                     onOpen = { nav.navigate(playerRoute(it)) },
                     onOpenSpace = { mid, name ->

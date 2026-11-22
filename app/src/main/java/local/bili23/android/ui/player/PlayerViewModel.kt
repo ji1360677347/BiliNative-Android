@@ -1,5 +1,7 @@
 package local.bili23.android.ui.player
 
+import android.util.Log
+import local.bili23.android.BuildConfig
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,7 +18,7 @@ import local.bili23.android.core.qualityName
 
 class PlayerViewModel(
     private val routeId: String,
-    private val initialCid: Int,
+    private val initialCid: Long,
 ) : ViewModel() {
 
     data class UiState(
@@ -55,10 +57,12 @@ class PlayerViewModel(
             _state.value = _state.value.copy(loading = true, error = null)
             try {
                 val detail = BiliApp.client.detail(base)
+                if (BuildConfig.DEBUG) Log.d("BiliPlayer", "route=$routeId cid=${detail.cid} parts=${detail.parts.size}")
                 val cid = initialCid.takeIf { it > 0 } ?: detail.cid
                 if (cid <= 0) throw BiliException("视频分集信息缺失")
                 val video = detail.copy(cid = cid)
                 _state.value = _state.value.copy(video = video)
+
                 val source = BiliApp.client.playback(
                     video = video,
                     cid = cid,
@@ -92,7 +96,7 @@ class PlayerViewModel(
         }
     }
 
-    private fun loadDanmaku(cid: Int, duration: Int) {
+    private fun loadDanmaku(cid: Long, duration: Int) {
         viewModelScope.launch {
             runCatching { BiliApp.client.danmakuForDuration(cid, duration) }
                 .onSuccess { list -> _state.value = _state.value.copy(danmaku = list) }
@@ -279,7 +283,7 @@ class PlayerViewModel(
         }
     }
 
-    fun rememberPosition(cid: Int, positionMs: Long) {
+    fun rememberPosition(cid: Long, positionMs: Long) {
         val video = _state.value.video ?: return
         if (positionMs < 3000) return
         BiliApp.store.remember(video.copy(cid = cid), cid, positionMs)

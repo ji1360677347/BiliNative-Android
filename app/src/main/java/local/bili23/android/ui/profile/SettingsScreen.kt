@@ -306,6 +306,7 @@ private fun SliderRow(label: String, value: Float, range: ClosedFloatingPointRan
             colors = androidx.compose.material3.SliderDefaults.colors(
                 thumbColor = colors.pink,
                 activeTrackColor = colors.pink,
+                inactiveTrackColor = colors.divider,
             ),
         )
         Text(

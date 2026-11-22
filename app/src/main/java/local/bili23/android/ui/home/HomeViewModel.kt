@@ -89,6 +89,7 @@ class HomeViewModel : ViewModel() {
                     }
                 }
             } catch (e: Exception) {
+                if (!reset) page = (page - 1).coerceAtLeast(1)
                 _state.update {
                     if (it.tab != tab) it
                     else it.copy(

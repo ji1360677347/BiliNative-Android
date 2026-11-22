@@ -120,7 +120,7 @@ import local.bili23.android.ui.theme.AppColors
 @Composable
 fun PlayerScreen(
     videoId: String,
-    initialCid: Int,
+    initialCid: Long,
     onBack: () -> Unit,
     onOpen: (Video) -> Unit,
     onOpenSpace: (Int, String) -> Unit,
@@ -154,7 +154,7 @@ fun PlayerScreen(
     var durationMs by remember { mutableLongStateOf(0L) }
     var playing by remember { mutableStateOf(false) }
     var buffering by remember { mutableStateOf(true) }
-    var lastCid by remember { mutableIntStateOf(-1) }
+    var lastCid by remember { mutableLongStateOf(-1L) }
 
     LaunchedEffect(exo) {
         while (true) {
@@ -192,13 +192,13 @@ fun PlayerScreen(
     }
     DisposableEffect(Unit) {
         onDispose {
-            vm.rememberPosition(video?.cid ?: 0, exo.currentPosition)
+            vm.rememberPosition(video?.cid ?: 0L, exo.currentPosition)
             activity?.applyFullscreen(false)
         }
     }
     BackHandler(enabled = fullscreen) { fullscreen = false }
     BackHandler(enabled = !fullscreen) {
-        vm.rememberPosition(video?.cid ?: 0, exo.currentPosition)
+        vm.rememberPosition(video?.cid ?: 0L, exo.currentPosition)
         onBack()
     }
 
@@ -225,7 +225,7 @@ fun PlayerScreen(
             modifier = stageModifier,
             onBack = {
                 if (fullscreen) fullscreen = false else {
-                    vm.rememberPosition(video?.cid ?: 0, exo.currentPosition)
+                    vm.rememberPosition(video?.cid ?: 0L, exo.currentPosition)
                     onBack()
                 }
             },
@@ -297,7 +297,7 @@ fun PlayerScreen(
                             contentColor = colors.pink,
                             divider = {},
                         ) {
-                            listOf("简介", "评论 ${state.comments.size}").forEachIndexed { index, title ->
+                            listOf("简介", "评论 " + countLabel(video?.replyCount ?: 0)).forEachIndexed { index, title ->
                                 Tab(
                                     selected = tab == index,
                                     onClick = { tab = index },
@@ -1264,7 +1264,8 @@ private fun Activity.applyFullscreen(enabled: Boolean) {
     requestedOrientation = if (enabled) {
         ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
     } else {
-        ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        // 应用本身是竖屏体验，退出全屏后明确回竖屏，避免部分设备停留在横屏。
+        ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
     }
     val controller = WindowCompat.getInsetsController(window, window.decorView)
     if (enabled) {

@@ -7,12 +7,12 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-data class VideoPart(val cid: Int, val title: String, val episodeId: Int? = null)
+data class VideoPart(val cid: Long, val title: String, val episodeId: Int? = null)
 
 data class Video(
     val bvid: String = "",
-    val aid: Int = 0,
-    val cid: Int = 0,
+    val aid: Long = 0L,
+    val cid: Long = 0L,
     val title: String,
     val cover: String = "",
     val author: String = "",
@@ -65,8 +65,8 @@ data class Video(
     companion object {
         fun fromJson(o: JSONObject): Video = Video(
             bvid = o.str("bvid"),
-            aid = o.int("aid"),
-            cid = o.int("cid"),
+            aid = o.long("aid"),
+            cid = o.long("cid"),
             title = o.str("title"),
             cover = o.str("cover"),
             author = o.str("author"),
@@ -77,7 +77,7 @@ data class Video(
             authorId = o.int("authorId").takeIf { it > 0 },
             pubdate = o.int("pubdate").takeIf { it > 0 },
             parts = o.arr("parts").objects().map {
-                VideoPart(it.int("cid"), it.str("title"), it.int("episodeId").takeIf { id -> id > 0 })
+                VideoPart(it.long("cid"), it.str("title"), it.int("episodeId").takeIf { id -> id > 0 })
             },
         )
     }
@@ -242,19 +242,19 @@ fun parseVideo(json: JSONObject): Video? {
     val owner = json.obj("owner") ?: JSONObject()
     val stat = json.obj("stat") ?: JSONObject()
     val pages = json.arr("pages").objects().mapNotNull { p ->
-        val cid = p.int("cid")
+        val cid = p.long("cid")
         if (cid <= 0) null else VideoPart(cid, p.str("part", "分集"))
     }
     return Video(
         bvid = bvid,
-        aid = json.int("aid"),
-        cid = json.int("cid").takeIf { it > 0 } ?: pages.firstOrNull()?.cid ?: 0,
+        aid = json.long("aid"),
+        cid = json.long("cid").takeIf { it > 0 } ?: pages.firstOrNull()?.cid ?: 0L,
         title = cleanText(json.str("title", "未命名视频")),
         cover = json.str("pic").ifBlank { json.str("cover") },
         author = owner.str("name").ifBlank { json.str("author") },
         plays = stat.int("view").takeIf { it > 0 } ?: json.int("play"),
         duration = videoDuration(json),
-        description = json.str("desc"),
+        description = json.str("desc").takeIf { it != "-" } ?: "",
         parts = pages,
         authorId = owner.int("mid").takeIf { it > 0 },
         authorAvatar = owner.str("face").ifBlank { null },

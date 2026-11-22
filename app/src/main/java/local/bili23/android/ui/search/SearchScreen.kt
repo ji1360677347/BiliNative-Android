@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -65,6 +66,7 @@ fun SearchScreen(onOpen: (Video) -> Unit) {
     val vm: SearchViewModel = viewModel()
     val state by vm.state.collectAsStateWithLifecycle()
     val colors = AppColors.current
+    val keyboard = LocalSoftwareKeyboardController.current
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -87,7 +89,7 @@ fun SearchScreen(onOpen: (Video) -> Unit) {
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier
                             .clip(CircleShape)
-                            .clickable { vm.search() }
+                            .clickable { keyboard?.hide(); vm.search() }
                             .padding(horizontal = 10.dp, vertical = 6.dp),
                     )
                 },
@@ -101,7 +103,7 @@ fun SearchScreen(onOpen: (Video) -> Unit) {
                     unfocusedContainerColor = colors.fill,
                 ),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { vm.search() }),
+                keyboardActions = KeyboardActions(onSearch = { keyboard?.hide(); vm.search() }),
             )
         }
 
@@ -193,7 +195,7 @@ fun SearchScreen(onOpen: (Video) -> Unit) {
                                     modifier = Modifier
                                         .clip(CircleShape)
                                         .background(colors.fill)
-                                        .clickable { vm.choose(keyword) }
+                                        .clickable { keyboard?.hide(); vm.choose(keyword) }
                                         .padding(horizontal = 12.dp, vertical = 6.dp),
                                 )
                             }
@@ -215,7 +217,7 @@ fun SearchScreen(onOpen: (Video) -> Unit) {
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(6.dp))
                                         .background(colors.fill)
-                                        .clickable { vm.choose(keyword) }
+                                        .clickable { keyboard?.hide(); vm.choose(keyword) }
                                         .padding(horizontal = 10.dp, vertical = 6.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {

@@ -193,16 +193,46 @@ fun UploaderScreen(
     val vm: UploaderViewModel = viewModel(key = "space-$mid") { UploaderViewModel(mid) }
     val state by vm.state.collectAsStateWithLifecycle()
     val colors = AppColors.current
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     Column(Modifier.fillMaxSize().background(colors.background).navigationBarsPadding()) {
         BackTopBar(title = name.ifBlank { "UP 主主页" }, onBack = onBack)
         when {
             state.loading -> LoadingBox()
-            state.error != null && state.videos.isEmpty() -> ErrorBox(
-                message = state.error ?: "加载失败",
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-                onRetry = { vm.load(false) },
-            )
+            state.error != null && state.videos.isEmpty() -> Column(
+                Modifier.fillMaxWidth().padding(top = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                ErrorBox(
+                    message = state.error ?: "加载失败",
+                    onRetry = { vm.load(false) },
+                )
+                Text(
+                    "B 站对 UP 主投稿接口有额外风控，若持续失败可先在浏览器查看。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.text3,
+                    modifier = Modifier.padding(horizontal = 24.dp),
+                )
+                Text(
+                    "在浏览器打开",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.pink,
+                    modifier = Modifier
+                        .padding(top = 10.dp)
+                        .clip(CircleShape)
+                        .background(colors.pinkSoft)
+                        .clickable {
+                            val context = context
+                            context.startActivity(
+                                android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse("https://space.bilibili.com/$mid"),
+                                )
+                            )
+                        }
+                        .padding(horizontal = 16.dp, vertical = 7.dp),
+                )
+            }
             state.videos.isEmpty() -> EmptyBox("该 UP 主暂时没有投稿")
             else -> LazyVerticalGrid(
                 columns = GridCells.Fixed(2),

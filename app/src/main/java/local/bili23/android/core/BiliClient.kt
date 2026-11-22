@@ -1,7 +1,11 @@
 package local.bili23.android.core
 
+import android.util.Log
+import local.bili23.android.BuildConfig
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -13,6 +17,7 @@ class BiliClient(private val store: Store) {
 
     private var wbiKey = ""
     private var wbiAt = 0L
+    private val deviceMutex = Mutex()
 
     // ---------- 基础请求 ----------
 
@@ -29,7 +34,11 @@ class BiliClient(private val store: Store) {
     private fun cookieFor(role: Identity?): String = role?.let { store.cookie(it) } ?: store.deviceCookie
 
     private suspend fun raw(path: String, query: Map<String, String> = emptyMap(), role: Identity? = null): JSONObject {
-        val text = Http.get(Http.apiUrl(path, query), cookieFor(role))
+        // 首次启动往往在 Wi-Fi 就绪前发出请求，buvid 拿不到会导致后续接口 412，这里按需补取。
+        if (store.buvid3.isBlank()) runCatching { ensureDevice() }
+        val url = Http.apiUrl(path, query)
+        if (BuildConfig.DEBUG) Log.d("BiliApi", "GET $url")
+        val text = Http.get(url, cookieFor(role))
         return runCatching { JSONObject(text) }.getOrElse { throw BiliException("接口返回格式异常") }
     }
 
@@ -41,6 +50,7 @@ class BiliClient(private val store: Store) {
     ): JSONObject {
         val root = raw(path, query, role)
         val code = root.int("code", -1)
+        if (code != 0 && BuildConfig.DEBUG) Log.w("BiliApi", "code=$code path=$path")
         if (code != 0 && !(allowGuest && code == -101)) throw errorFor(root, code)
         return root.obj("data") ?: root.obj("result") ?: JSONObject()
     }
@@ -69,8 +79,10 @@ class BiliClient(private val store: Store) {
     /** 首次启动取一次 buvid3 / buvid4，游客访问也更容易通过风控。 */
     suspend fun ensureDevice() {
         if (store.buvid3.isNotBlank()) return
-        runCatching {
-            val data = api("/x/frontend/finger/spi")
+        deviceMutex.withLock {
+            if (store.buvid3.isNotBlank()) return@withLock
+            val text = Http.get("${Http.API}/x/frontend/finger/spi", store.deviceCookie)
+            val data = runCatching { JSONObject(text).obj("data") }.getOrNull() ?: return@withLock
             val b3 = data.str("b_3")
             val b4 = data.str("b_4")
             if (b3.isNotBlank()) store.buvid3 = b3
@@ -193,7 +205,7 @@ class BiliClient(private val store: Store) {
             val bvid = item.str("bvid")
             if (bvid.isBlank()) null else Video(
                 bvid = bvid,
-                aid = item.int("aid"),
+                aid = item.long("aid"),
                 title = cleanText(item.str("title", "视频")),
                 cover = normalizeUrl(item.str("pic")),
                 author = cleanText(item.str("author")),
@@ -233,14 +245,14 @@ class BiliClient(private val store: Store) {
                 ?: throw BiliException("没有可播放的分集")
             return Video(
                 bvid = target.str("bvid"),
-                cid = target.int("cid"),
+                cid = target.long("cid"),
                 title = cleanText(data.str("title", video.title)),
                 cover = normalizeUrl(data.str("cover")),
                 author = "番剧 · ${target.str("long_title")}",
                 episodeId = target.int("id"),
                 description = data.str("evaluate"),
                 parts = episodes.mapNotNull { e ->
-                    val cid = e.int("cid")
+                    val cid = e.long("cid")
                     if (cid <= 0) null else VideoPart(
                         cid = cid,
                         title = "${e.str("title")} ${e.str("long_title")}".trim(),
@@ -293,7 +305,7 @@ class BiliClient(private val store: Store) {
 
     private suspend fun fetchPlayback(
         video: Video,
-        cid: Int,
+        cid: Long,
         quality: Int,
         role: Identity,
     ): PlaybackSource {
@@ -304,15 +316,19 @@ class BiliClient(private val store: Store) {
             "fnver" to "0",
             "fourk" to "1",
         )
-        val path: String
+        val data: JSONObject
         if (video.episodeId != null) {
             params["ep_id"] = video.episodeId.toString()
-            path = "/pgc/player/web/v2/playurl"
+            data = api("/pgc/player/web/v2/playurl", params, role = role)
         } else {
             params["bvid"] = video.bvid
-            path = "/x/player/playurl"
+            // Web 端已切到 wbi/playurl；未签名接口在部分视频上会返回 -404，保留回退。
+            data = runCatching { api("/x/player/wbi/playurl", signed(params), role = role) }
+                .getOrElse {
+                    params["bvid"] = video.bvid
+                    api("/x/player/playurl", params, role = role)
+                }
         }
-        val data = api(path, params, role = role)
         val info = data.obj("video_info") ?: data.obj("result") ?: data
         val check = data.obj("play_check") ?: JSONObject()
         if (info.bool("is_preview") || data.str("play_video_type") == "preview" || check.str("play_detail") == "PLAY_PREVIEW") {
@@ -340,7 +356,7 @@ class BiliClient(private val store: Store) {
 
     suspend fun playback(
         video: Video,
-        cid: Int,
+        cid: Long,
         quality: Int = 127,
         preference: PlaybackPreference = store.preference,
     ): PlaybackSource {
@@ -364,7 +380,7 @@ class BiliClient(private val store: Store) {
 
     // ---------- 弹幕 ----------
 
-    suspend fun danmaku(cid: Int, segment: Int): List<Danmaku> {
+    suspend fun danmaku(cid: Long, segment: Int): List<Danmaku> {
         if (cid <= 0 || segment !in 1..1680) return emptyList()
         val query = signed(
             mapOf("type" to "1", "oid" to cid.toString(), "segment_index" to segment.toString())
@@ -376,14 +392,14 @@ class BiliClient(private val store: Store) {
         return DanmakuParser.parse(bytes)
     }
 
-    suspend fun danmakuForDuration(cid: Int, durationSeconds: Int): List<Danmaku> = coroutineScope {
+    suspend fun danmakuForDuration(cid: Long, durationSeconds: Int): List<Danmaku> = coroutineScope {
         if (cid <= 0) return@coroutineScope emptyList()
         val segments = ((durationSeconds.coerceAtLeast(1) + 359) / 360).coerceIn(1, 12)
         val parts = (1..segments).map { index -> async { runCatching { danmaku(cid, index) }.getOrDefault(emptyList()) } }
         parts.flatMap { it.await() }.distinctBy { it.id }.sortedWith(compareBy({ it.time }, { it.id }))
     }
 
-    suspend fun sendDanmaku(video: Video, cid: Int, progressMs: Long, mode: Int, color: Int, content: String): Danmaku {
+    suspend fun sendDanmaku(video: Video, cid: Long, progressMs: Long, mode: Int, color: Int, content: String): Danmaku {
         val text = content.trim()
         if (text.isEmpty()) throw BiliException("弹幕内容不能为空")
         if (text.length > 100) throw BiliException("弹幕最多 100 个字")
@@ -452,11 +468,11 @@ class BiliClient(private val store: Store) {
         )
     }
 
-    private suspend fun aidOf(video: Video): Int {
+    private suspend fun aidOf(video: Video): Long {
         if (video.aid > 0) return video.aid
         if (video.bvid.isBlank()) throw BiliException("视频信息缺失")
         val data = api("/x/web-interface/view", mapOf("bvid" to video.bvid), role = Identity.PERSONAL)
-        return data.int("aid").takeIf { it > 0 } ?: throw BiliException("无法取得视频编号")
+        return data.long("aid").takeIf { it > 0 } ?: throw BiliException("无法取得视频编号")
     }
 
     suspend fun comments(video: Video, page: Int = 1): List<VideoComment> {
@@ -625,7 +641,7 @@ class BiliClient(private val store: Store) {
             val count = media.obj("cnt_info") ?: JSONObject()
             Video(
                 bvid = bvid,
-                aid = media.int("id"),
+                aid = media.long("id"),
                 title = cleanText(media.str("title", "视频")),
                 cover = normalizeUrl(media.str("cover")),
                 author = upper.str("name"),
@@ -652,8 +668,8 @@ class BiliClient(private val store: Store) {
             val viewAt = item.long("view_at")
             Video(
                 bvid = bvid,
-                aid = history.int("oid"),
-                cid = history.int("cid"),
+                aid = history.long("oid"),
+                cid = history.long("cid"),
                 title = cleanText(item.str("title", "视频")),
                 cover = normalizeUrl(item.str("cover")),
                 author = item.str("author_name"),

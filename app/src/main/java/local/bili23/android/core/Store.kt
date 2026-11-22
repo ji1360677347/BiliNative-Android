@@ -115,7 +115,7 @@ class Store(context: Context) {
             }.toString(),
         ).apply()
 
-    fun remember(video: Video, cid: Int, positionMs: Long) {
+    fun remember(video: Video, cid: Long, positionMs: Long) {
         if (video.bvid.isBlank()) return
         val entry = video.copy(cid = cid)
         val rest = localHistory.filterNot { it.routeId == entry.routeId }

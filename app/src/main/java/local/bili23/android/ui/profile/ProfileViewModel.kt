@@ -24,10 +24,6 @@ class ProfileViewModel : ViewModel() {
     private val _state = MutableStateFlow(UiState())
     val state = _state.asStateFlow()
 
-    init {
-        refresh()
-    }
-
     fun refresh() {
         _state.update { it.copy(loading = true, error = null) }
         viewModelScope.launch {
