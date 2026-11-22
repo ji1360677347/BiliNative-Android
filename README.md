@@ -22,13 +22,20 @@
 
 游客也能浏览首页、搜索、看视频和弹幕；登录后才有 1080P、历史、收藏、动态、评论与弹幕发送。
 
+### 会员播放源（可选）
+
+- **手动 Cookie**：设置 → 会员播放源 → 导入，粘贴大会员账号的 Cookie。
+- **Cookie API**：设置 → 会员 Cookie API，填入返回 Cookie 的 HTTPS 地址（例如 NAS 的 `/api/pages/<id>/cookies?key=...`），取流前每 6 小时自动刷新一次。
+- 支持 `JSON 数组`、`{"cookies":[...]}`、`{"header":"SESSDATA=..."}` 或直接返回 Cookie 文本；只接受 `bilibili.com` 域的 Cookie。
+- 刷新失败不会覆盖已有会员 Cookie；手动粘贴 Cookie 会停止 API 自动更新。
+
 | 首页 | 播放与弹幕 |
 | --- | --- |
 | ![首页](docs/screenshots/home.jpg) | ![播放](docs/screenshots/player.jpg) |
 | **评论 / 楼中楼** | **扫码登录** |
 | ![评论](docs/screenshots/comments.jpg) | ![扫码登录](docs/screenshots/login.jpg) |
-| **官方网页登录（推荐）** | **深色设置** |
-| ![网页登录](docs/screenshots/web-login.jpg) | ![设置](docs/screenshots/settings.jpg) |
+| **官方网页登录（推荐）** | **会员 Cookie API** |
+| ![网页登录](docs/screenshots/web-login.jpg) | ![会员 API](docs/screenshots/member-api.jpg) |
 
 截图取自 Android 15（API 35）模拟器实测，界面同时支持深色与浅色主题。
 
@@ -45,7 +52,7 @@
 - 画质切换（8K / 4K / 1080P60 / 1080P / 720P / 480P / 360P，按账号实际权限展示）
 - 倍速（0.5x–3x）、拖动进度、双击暂停、横屏全屏
 - 多分 P 选集、相关推荐、UP 主信息
-- 会员播放源：可选「自动优先会员 / 个人账号 / 会员账号」，自动模式失败回退并提示
+- 会员播放源：可选「自动优先会员 / 个人账号 / 会员账号」，支持手动 Cookie 与 Cookie API 定时刷新，自动模式失败回退并提示
 - 播放进度写入本机观看记录
 
 ### 弹幕

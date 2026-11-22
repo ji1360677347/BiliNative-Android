@@ -64,6 +64,7 @@ fun SettingsScreen(onBack: () -> Unit) {
     var area by remember { mutableFloatStateOf(store.danmakuArea) }
     var theme by remember { mutableIntStateOf(AppRuntime.themeMode) }
     var editingRole by remember { mutableStateOf<Identity?>(null) }
+    var showMemberApi by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
 
     Column(
@@ -146,6 +147,18 @@ fun SettingsScreen(onBack: () -> Unit) {
                 subtitle = if (store.memberCookie.isBlank()) "未配置（可选）" else "已配置，仅用于取会员画质",
                 action = if (store.memberCookie.isBlank()) "导入" else "更新",
             ) { editingRole = Identity.MEMBER }
+            Spacer(Modifier.height(10.dp))
+            AccountRow(
+                title = "会员 Cookie API",
+                subtitle = when {
+                    store.memberApiUrl.isBlank() -> "未配置，可自动获取会员 Cookie"
+                    store.memberApiFailedAt > store.memberRefreshedAt -> "已配置 · 最近刷新失败，点此检查"
+                    store.memberRefreshedAt > 0 ->
+                        "已配置 · 上次刷新 ${local.bili23.android.core.relativeTime(store.memberRefreshedAt / 1000)}"
+                    else -> "已配置，等待首次刷新"
+                },
+                action = "配置",
+            ) { showMemberApi = true }
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
@@ -226,6 +239,13 @@ fun SettingsScreen(onBack: () -> Unit) {
             )
         }
         Spacer(Modifier.height(24.dp))
+    }
+
+    if (showMemberApi) {
+        MemberApiDialog(
+            onDismiss = { showMemberApi = false },
+            onMessage = { message = it },
+        )
     }
 
     editingRole?.let { role ->
@@ -321,7 +341,13 @@ private fun SliderRow(label: String, value: Float, range: ClosedFloatingPointRan
 @Composable
 private fun AccountRow(title: String, subtitle: String, action: String, onClick: () -> Unit) {
     val colors = AppColors.current
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyMedium, color = colors.text1)
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = colors.text3)

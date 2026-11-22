@@ -170,6 +170,7 @@ fun ProfileScreen(
                 Text(
                     text = when {
                         state.member != null -> "${state.member!!.name} · 大会员可用"
+                        BiliApp.store.memberApiUrl.isNotBlank() -> "已配置 API，取流时自动刷新"
                         BiliApp.store.memberCookie.isNotBlank() -> "已配置，待验证"
                         else -> "未配置，画质以个人账号为准"
                     },

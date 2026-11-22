@@ -38,6 +38,14 @@ class ProfileViewModel : ViewModel() {
                     it.copy(account = null, loading = false, error = e.message ?: "账号状态异常")
                 }
             }
+            // 会员 Cookie API 到期时在后台刷新，不阻塞「我的」页展示。
+            if (BiliApp.store.memberApiUrl.isNotBlank()) {
+                viewModelScope.launch {
+                    runCatching { BiliApp.client.refreshMemberIfDue() }
+                    val member = runCatching { BiliApp.client.account(Identity.MEMBER) }.getOrNull()
+                    _state.update { it.copy(member = member) }
+                }
+            }
         }
     }
 

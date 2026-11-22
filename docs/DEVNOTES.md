@@ -58,3 +58,11 @@
 - 登录页固定用浅色 `Configuration` 渲染，避免深色模式下协议勾选框不可见；页面加载完成后 1.2 秒轮询一次 Cookie，也可点右上角「完成」手动触发。
 - **Cookie 导入**：只强制要求 `SESSDATA`；没有 `bili_jct` 时按只读登录处理，评论/弹幕会提示需要完整 Cookie。
 - 所有 Cookie 仅写入应用私有 `SharedPreferences`，WebView 与接口会话互不共享。
+
+## 9. 会员 Cookie API
+
+- 与 iOS 版一致的用法：保存一个 HTTPS 地址，取流前按 6 小时间隔拉取一份大会员 Cookie。
+- 请求不带任何 B 站 Cookie / Referer，且**禁止重定向**（地址里可能带访问密钥）；响应上限 1 MB。
+- 支持 `[{"name":"SESSDATA","value":"...","domain":".bilibili.com"}]`、`{"cookies":[...]}`、`{"header":"..."}` 和纯 Cookie 文本；只接受 `bilibili.com` 域。
+- 刷新成功会走完整的 `nav` 校验（含大会员权益）；失败保留旧 Cookie，并设置 10 分钟冷却，避免每次播放都请求。
+- 手动粘贴会员 Cookie 会清除 API 地址，防止下次自动刷新把手动凭据覆盖掉。

@@ -18,6 +18,7 @@ class BiliClient(private val store: Store) {
     private var wbiKey = ""
     private var wbiAt = 0L
     private val deviceMutex = Mutex()
+    private val memberRefreshMutex = Mutex()
 
     // ---------- 基础请求 ----------
 
@@ -111,7 +112,11 @@ class BiliClient(private val store: Store) {
         )
     }
 
-    suspend fun importCookie(input: String, role: Identity): Account {
+    suspend fun importCookie(
+        input: String,
+        role: Identity,
+        dropMemberApi: Boolean = true,
+    ): Account {
         val cookie = parseCookieInput(input)
         val previous = when (role) {
             Identity.PERSONAL -> store.personalCookie
@@ -121,7 +126,7 @@ class BiliClient(private val store: Store) {
             Identity.PERSONAL -> store.personalCookie = cookie
             Identity.MEMBER -> store.memberCookie = cookie
         }
-        return try {
+        val account = try {
             account(role) ?: throw BiliException("Cookie 无效")
         } catch (e: Exception) {
             when (role) {
@@ -130,13 +135,78 @@ class BiliClient(private val store: Store) {
             }
             throw e
         }
+        // 手动粘贴会员 Cookie 后停止 API 自动更新，避免被下一次刷新覆盖。
+        if (role == Identity.MEMBER && dropMemberApi) resetMemberApi()
+        return account
     }
 
     fun logout(role: Identity) {
         when (role) {
             Identity.PERSONAL -> store.personalCookie = ""
-            Identity.MEMBER -> store.memberCookie = ""
+            Identity.MEMBER -> {
+                store.memberCookie = ""
+                resetMemberApi()
+            }
         }
+    }
+
+    // ---------- 会员 Cookie API ----------
+
+    fun memberApiUrl(): String? = store.memberApiUrl.takeIf { it.isNotBlank() }
+
+    fun memberRefreshedAt(): Long = store.memberRefreshedAt
+
+    fun configureMemberApi(input: String): String {
+        val url = MemberApi.validateUrl(input)
+        store.memberApiUrl = url
+        store.memberRefreshedAt = 0
+        store.memberApiFailedAt = 0
+        return url
+    }
+
+    fun resetMemberApi() {
+        store.memberApiUrl = ""
+        store.memberRefreshedAt = 0
+        store.memberApiFailedAt = 0
+    }
+
+    /** 从已保存的 API 拉取 Cookie 并校验大会员权益；失败不会覆盖现有会员 Cookie。 */
+    suspend fun refreshMemberFromApi(manual: Boolean = false): Account {
+        val url = memberApiUrl() ?: throw BiliException("请先在设置中配置会员 Cookie API")
+        return memberRefreshMutex.withLock {
+            val now = System.currentTimeMillis()
+            if (!manual && store.memberApiFailedAt > 0 && now - store.memberApiFailedAt < 10 * 60_000L) {
+                throw BiliException("会员 API 最近刷新失败，请稍后再试")
+            }
+            try {
+                val text = Http.getExternal(url)
+                val cookie = try {
+                    MemberApi.parseResponse(text)
+                } catch (e: Exception) {
+                    throw BiliException("会员 API 返回内容无效：${e.message}")
+                }
+                val account = try {
+                    importCookie(cookie, Identity.MEMBER, dropMemberApi = false)
+                } catch (e: Exception) {
+                    throw BiliException("会员 API 返回的 Cookie 未通过校验：${e.message}")
+                }
+                store.memberRefreshedAt = System.currentTimeMillis()
+                store.memberApiFailedAt = 0
+                account
+            } catch (e: Exception) {
+                store.memberApiFailedAt = System.currentTimeMillis()
+                throw e
+            }
+        }
+    }
+
+    /** 到期（6 小时）时自动刷新；没有配置 API 或未到期返回 null。 */
+    suspend fun refreshMemberIfDue(): Account? {
+        if (store.memberApiUrl.isBlank()) return null
+        val due = store.memberCookie.isBlank() ||
+            System.currentTimeMillis() - store.memberRefreshedAt >= 6 * 3_600_000L
+        if (!due) return null
+        return runCatching { refreshMemberFromApi() }.getOrNull()
     }
 
     // ---------- WBI ----------
@@ -362,9 +432,21 @@ class BiliClient(private val store: Store) {
     ): PlaybackSource {
         if (cid <= 0) throw BiliException("视频分集信息缺失")
         var notice: String? = null
+        if (preference != PlaybackPreference.PERSONAL && store.memberApiUrl.isNotBlank()) {
+            val due = store.memberCookie.isBlank() ||
+                System.currentTimeMillis() - store.memberRefreshedAt >= 6 * 3_600_000L
+            if (due) {
+                try {
+                    refreshMemberFromApi()
+                } catch (e: Exception) {
+                    notice = "会员源自动刷新失败：${e.message}"
+                }
+            }
+        }
         if (preference != PlaybackPreference.PERSONAL && store.memberCookie.isNotBlank()) {
             try {
-                return fetchPlayback(video, cid, quality, Identity.MEMBER)
+                val memberSource = fetchPlayback(video, cid, quality, Identity.MEMBER)
+                return memberSource.copy(notice = notice)
             } catch (e: Exception) {
                 if (preference == PlaybackPreference.MEMBER) {
                     throw BiliException("会员源不可用：${e.message}")
@@ -372,7 +454,10 @@ class BiliClient(private val store: Store) {
                 notice = "会员源暂不可用，已使用当前账号可用画质"
             }
         } else if (preference == PlaybackPreference.MEMBER) {
-            throw BiliException("会员源尚未配置，请先在设置中导入会员 Cookie")
+            throw BiliException(
+                notice?.let { "$it，且没有可用的会员 Cookie" }
+                    ?: "会员源尚未配置，请在设置中导入会员 Cookie 或配置 API"
+            )
         }
         val source = fetchPlayback(video, cid, quality, Identity.PERSONAL)
         return source.copy(notice = notice)

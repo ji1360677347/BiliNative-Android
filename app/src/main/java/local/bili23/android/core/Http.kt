@@ -28,6 +28,15 @@ object Http {
     /** 图片加载复用同一连接池（Coil 使用）。 */
     val imageClient: OkHttpClient get() = client
 
+    /** 会员 Cookie API 专用：不发送 B 站 Cookie / Referer，也不跟随重定向（URL 里带访问密钥）。 */
+    private val externalClient: OkHttpClient by lazy {
+        client.newBuilder()
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .callTimeout(25, TimeUnit.SECONDS)
+            .build()
+    }
+
     fun apiUrl(path: String, query: Map<String, String> = emptyMap()): String {
         val builder = okhttp3.HttpUrl.Builder()
             .scheme("https")
@@ -79,6 +88,27 @@ object Http {
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) throw BiliException("网络请求失败（HTTP ${response.code}）")
             Response(body, response.headers.toMultimap())
+        }
+    }
+
+    suspend fun getExternal(url: String): String = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", UA)
+            .header("Accept", "application/json")
+            .build()
+        externalClient.newCall(request).execute().use { response ->
+            val body = response.body
+            if ((body?.contentLength() ?: -1) > 1_048_576) throw BiliException("会员 API 返回过大")
+            val text = body?.string().orEmpty()
+            if (text.length > 1_048_576) throw BiliException("会员 API 返回过大")
+            when {
+                response.code == 200 -> text
+                response.code in 300..399 -> throw BiliException("会员 API 不允许重定向，请直接填写最终地址")
+                response.code == 401 || response.code == 403 ->
+                    throw BiliException("会员 API 密钥无效或无访问权限")
+                else -> throw BiliException("会员 API 请求失败（HTTP ${response.code}）")
+            }
         }
     }
 

@@ -18,6 +18,19 @@ class Store(context: Context) {
         get() = sp.getString("cookie.member", "").orEmpty()
         set(value) = sp.edit().putString("cookie.member", value).apply()
 
+    /** 会员 Cookie API 地址（含访问密钥，仅存本机）。 */
+    var memberApiUrl: String
+        get() = sp.getString("member.apiUrl", "").orEmpty()
+        set(value) = sp.edit().putString("member.apiUrl", value).apply()
+
+    var memberRefreshedAt: Long
+        get() = sp.getLong("member.refreshedAt", 0L)
+        set(value) = sp.edit().putLong("member.refreshedAt", value).apply()
+
+    var memberApiFailedAt: Long
+        get() = sp.getLong("member.apiFailedAt", 0L)
+        set(value) = sp.edit().putLong("member.apiFailedAt", value).apply()
+
     var buvid3: String
         get() = sp.getString("device.buvid3", "").orEmpty()
         set(value) = sp.edit().putString("device.buvid3", value).apply()
