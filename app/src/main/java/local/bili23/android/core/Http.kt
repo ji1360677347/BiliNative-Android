@@ -60,6 +60,28 @@ object Http {
         }
     }
 
+    data class Response(val body: String, val headers: Map<String, List<String>>)
+
+    /** 需要读取 Set-Cookie 的场景（扫码登录回调）。 */
+    suspend fun getResponse(
+        url: String,
+        cookie: String = "",
+        referer: String = REFERER,
+    ): Response = withContext(Dispatchers.IO) {
+        val builder = Request.Builder()
+            .url(url)
+            .header("User-Agent", UA)
+            .header("Referer", referer)
+            .header("Accept", "application/json, text/plain, */*")
+            .header("Accept-Language", "zh-CN,zh;q=0.9")
+        if (cookie.isNotBlank()) builder.header("Cookie", cookie)
+        client.newCall(builder.build()).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) throw BiliException("网络请求失败（HTTP ${response.code}）")
+            Response(body, response.headers.toMultimap())
+        }
+    }
+
     suspend fun getBytes(
         url: String,
         cookie: String = "",

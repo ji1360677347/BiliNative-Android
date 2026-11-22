@@ -745,27 +745,50 @@ class BiliClient(private val store: Store) {
     }
 
     suspend fun qrPoll(key: String): QRPoll {
-        val text = Http.get(
+        val response = Http.getResponse(
             "https://passport.bilibili.com/x/passport-login/web/qrcode/poll?qrcode_key=$key",
             store.deviceCookie,
         )
-        val root = runCatching { JSONObject(text) }.getOrElse { throw BiliException("登录验证请求失败") }
+        val root = runCatching { JSONObject(response.body) }
+            .getOrElse { throw BiliException("登录验证请求失败") }
         if (root.int("code") != 0) throw BiliException("登录验证请求失败")
         val data = root.obj("data") ?: JSONObject()
-        return when (data.int("code")) {
+        val state = data.int("code")
+        if (BuildConfig.DEBUG) Log.d("BiliLogin", "poll state=$state hasUrl=${data.str("url").isNotBlank()}")
+        return when (state) {
             86101 -> QRPoll.Waiting
             86090 -> QRPoll.Confirmation
             86038 -> QRPoll.Expired
             0 -> {
+                val names = listOf("SESSDATA", "bili_jct", "DedeUserID", "DedeUserID__ckMd5", "sid")
+                val values = LinkedHashMap<String, String>()
+                // 优先使用回调 URL 中的参数；部分账号/环境下 url 为空，需要退回 Set-Cookie。
                 val query = data.str("url").substringAfter('?', "")
-                val map = query.split("&").mapNotNull { pair ->
-                    val i = pair.indexOf('=')
-                    if (i <= 0) null else pair.substring(0, i) to pair.substring(i + 1)
-                }.toMap()
-                val parts = listOf("SESSDATA", "bili_jct", "DedeUserID", "DedeUserID__ckMd5", "sid")
-                    .mapNotNull { name -> map[name]?.let { "$name=$it" } }
-                if (parts.isEmpty()) throw BiliException("登录成功但未取得 Cookie，请重试")
-                QRPoll.Success(importCookie(parts.joinToString("; "), Identity.PERSONAL))
+                query.split("&").forEach { pair ->
+                    val index = pair.indexOf('=')
+                    if (index > 0) {
+                        val name = pair.substring(0, index)
+                        val value = pair.substring(index + 1)
+                        if (name in names && value.isNotBlank()) values[name] = value
+                    }
+                }
+                response.headers.entries
+                    .filter { it.key.equals("Set-Cookie", ignoreCase = true) }
+                    .flatMap { it.value }
+                    .forEach { header ->
+                        val pair = header.substringBefore(';').trim()
+                        val name = pair.substringBefore('=').trim()
+                        val value = pair.substringAfter('=', "").trim()
+                        if (name in names && value.isNotBlank() && values[name].isNullOrBlank()) {
+                            values[name] = value
+                        }
+                    }
+                if (values["SESSDATA"].isNullOrBlank()) {
+                    if (BuildConfig.DEBUG) Log.w("BiliLogin", "poll success without SESSDATA, names=${values.keys}")
+                    throw BiliException("登录成功但未取得 Cookie，请重试或改用网页登录")
+                }
+                val cookie = names.mapNotNull { name -> values[name]?.let { "$name=$it" } }.joinToString("; ")
+                QRPoll.Success(importCookie(cookie, Identity.PERSONAL))
             }
             else -> throw BiliException("登录状态异常，请刷新二维码")
         }

@@ -8,13 +8,25 @@
 
 ## 下载
 
-[Releases](https://github.com/ji1360677347/BiliNative-Android/releases/latest) 提供可直接安装的 APK（v0.1.0 起，使用 debug 签名，正式分发请自行配置签名）。也可以自行构建：`./gradlew assembleDebug`。
+[Releases](https://github.com/ji1360677347/BiliNative-Android/releases/latest) 提供可直接安装的 APK（使用 debug 签名，正式分发请自行配置签名）。也可以自行构建：`./gradlew assembleDebug`。
+
+## 登录
+
+安装后**不需要填写任何 API 地址**：
+
+- **官方网页登录**（推荐）：我的 → 登录 → 网页登录 → 打开官方登录页，支持手机号验证码或账号密码，登录成功后自动返回。
+- **扫码登录**：用 B 站 App 扫描二维码并确认。
+- **Cookie 导入**：电脑浏览器登录 bilibili.com，复制任意请求的 Cookie 请求头（需含 `SESSDATA`）。
+
+游客也能浏览首页、搜索、看视频和弹幕；登录后才有 1080P、历史、收藏、动态、评论与弹幕发送。
 
 | 首页 | 播放与弹幕 |
 | --- | --- |
 | ![首页](docs/screenshots/home.jpg) | ![播放](docs/screenshots/player.jpg) |
 | **评论 / 楼中楼** | **扫码登录** |
-| ![评论](docs/screenshots/comments.jpg) | ![登录](docs/screenshots/login.jpg) |
+| ![评论](docs/screenshots/comments.jpg) | ![扫码登录](docs/screenshots/login.jpg) |
+| **官方网页登录（推荐）** | **深色设置** |
+| ![网页登录](docs/screenshots/web-login.jpg) | ![设置](docs/screenshots/settings.jpg) |
 
 截图取自 Android 15（API 35）模拟器实测，界面同时支持深色与浅色主题。
 
@@ -46,8 +58,10 @@
 - 发送弹幕（滚动 / 顶部 / 底部）
 
 ### 账号
-- 扫码登录（二维码本地生成 + 轮询确认）
-- Cookie 导入（个人账号 / 会员源分开保存）
+- 三种登录方式：**官方网页登录**（账号密码 / 短信验证码）、扫码登录（二维码本地生成 + 轮询确认）、Cookie 导入
+- 扫码回调同时解析回调 URL 与 `Set-Cookie`，避免部分账号拿不到 SESSDATA
+- Cookie 导入支持仅 SESSDATA 的只读登录（评论/弹幕会提示需要完整 Cookie）
+- 个人账号 / 会员源分开保存
 - Cookie 仅保存在应用私有 `SharedPreferences`，不会上传到任何第三方
 - 深色 / 浅色 / 跟随系统主题
 
@@ -67,7 +81,8 @@ UP 主投稿列表（`/x/space/wbi/arc/search`）目前会被 B 站风控拦截�
 - 评论列表、楼中楼预览、评论附图、点赞入口
 - 搜索、排序、搜索历史、B 站热搜
 - 本机观看记录写入与回放
-- 扫码登录二维码生成与状态轮询（未用真实账号完成确认）
+- 扫码登录二维码生成与状态轮询；官方网页登录页（账号密码 / 短信）在 WebView 中正常加载
+- 登录 Cookie 捕获与校验链路（未使用真实账号完成最终确认）
 - 深色 / 浅色主题、横屏全屏播放与退出
 
 登录后的云端历史、收藏夹、关注动态、评论 / 弹幕发送依赖真实账号，代码路径已完成但未在本次验证中执行写操作。

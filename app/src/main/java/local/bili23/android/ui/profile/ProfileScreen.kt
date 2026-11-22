@@ -187,7 +187,7 @@ fun ProfileScreen(
 
         Spacer(Modifier.height(20.dp))
         Text(
-            text = "哔哩轻看 Android 0.1.0 · 非官方客户端\n所有内容版权归哔哩哔哩及原作者所有",
+            text = "哔哩轻看 Android ${local.bili23.android.BuildConfig.VERSION_NAME} · 非官方客户端\n所有内容版权归哔哩哔哩及原作者所有",
             style = MaterialTheme.typography.bodySmall,
             color = colors.text3,
             lineHeight = 17.sp,

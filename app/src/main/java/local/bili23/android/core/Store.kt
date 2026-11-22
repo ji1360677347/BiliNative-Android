@@ -136,8 +136,7 @@ fun parseCookieInput(raw: String): String {
     val pairs = text.split(";").map { it.trim() }.filter { it.contains("=") }
     if (pairs.isEmpty()) throw BiliException("Cookie 格式不正确")
     val hasSession = pairs.any { it.startsWith("SESSDATA=") }
-    val hasCsrf = pairs.any { it.startsWith("bili_jct=") }
-    if (!hasSession && !hasCsrf) throw BiliException("Cookie 中缺少 SESSDATA 或 bili_jct")
+    if (!hasSession) throw BiliException("Cookie 中缺少 SESSDATA，请复制完整的 Cookie 请求头")
     return pairs.joinToString("; ")
 }
 

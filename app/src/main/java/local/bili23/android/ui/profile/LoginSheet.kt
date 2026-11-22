@@ -65,6 +65,7 @@ fun LoginSheet(
     var qrStatus by remember { mutableStateOf("正在生成二维码…") }
     var qrLoading by remember { mutableStateOf(true) }
     var generateKey by remember { mutableIntStateOf(0) }
+    var showWebLogin by remember { mutableStateOf(false) }
 
     LaunchedEffect(generateKey) {
         qrLoading = true
@@ -119,7 +120,7 @@ fun LoginSheet(
                 modifier = Modifier.padding(top = 14.dp),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                listOf("扫码登录", "Cookie 导入").forEachIndexed { index, label ->
+                listOf("扫码登录", "Cookie 导入", "网页登录").forEachIndexed { index, label ->
                     Text(
                         text = label,
                         fontSize = 13.sp,
@@ -161,16 +162,32 @@ fun LoginSheet(
                     }
                     Spacer(Modifier.height(12.dp))
                     Text(qrStatus, style = MaterialTheme.typography.bodySmall, color = colors.text2)
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Text(
+                            "刷新二维码",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.pink,
+                            modifier = Modifier
+                                .padding(top = 8.dp)
+                                .clickable { generateKey++ },
+                        )
+                        Text(
+                            "改用网页登录",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.blue,
+                            modifier = Modifier
+                                .padding(top = 8.dp)
+                                .clickable { mode = 2 },
+                        )
+                    }
                     Text(
-                        "刷新二维码",
+                        "扫码后长时间无反应，通常是网页登录态或网络问题，可改用网页登录。",
                         style = MaterialTheme.typography.bodySmall,
-                        color = colors.pink,
-                        modifier = Modifier
-                            .padding(top = 8.dp)
-                            .clickable { generateKey++ },
+                        color = colors.text3,
+                        modifier = Modifier.padding(top = 10.dp),
                     )
                 }
-            } else {
+            } else if (mode == 1) {
                 var cookieText by remember { mutableStateOf("") }
                 var busy by remember { mutableStateOf(false) }
                 var error by remember { mutableStateOf<String?>(null) }
@@ -191,6 +208,14 @@ fun LoginSheet(
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.text3,
                         modifier = Modifier.padding(top = 8.dp),
+                    )
+                    Text(
+                        "也可以直接用官方网页登录",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.blue,
+                        modifier = Modifier
+                            .padding(top = 8.dp)
+                            .clickable { mode = 2 },
                     )
                     Button(
                         onClick = {
@@ -214,8 +239,45 @@ fun LoginSheet(
                         Text(if (busy) "验证中…" else "导入并验证")
                     }
                 }
+            } else {
+                Column(Modifier.fillMaxWidth().padding(top = 18.dp)) {
+                    Text(
+                        "使用 B 站官方网页登录",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = colors.text1,
+                    )
+                    Text(
+                        "支持账号密码、短信验证码，账号信息只在 B 站官方页面内填写，客户端只读取登录后的 Cookie。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.text3,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                    Button(
+                        onClick = { showWebLogin = true },
+                        modifier = Modifier.padding(top = 14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.pink),
+                    ) {
+                        Text("打开官方登录页")
+                    }
+                    Text(
+                        "如果页面提示环境异常，点右上角刷新重试；仍不行可在电脑浏览器登录后使用 Cookie 导入。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.text3,
+                        modifier = Modifier.padding(top = 10.dp),
+                    )
+                }
             }
         }
+    }
+
+    if (showWebLogin) {
+        WebLoginDialog(
+            onDismiss = { showWebLogin = false },
+            onLoggedIn = { account ->
+                showWebLogin = false
+                onLoggedIn(account)
+            },
+        )
     }
 }
 

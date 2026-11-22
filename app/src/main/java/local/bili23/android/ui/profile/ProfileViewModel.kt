@@ -50,8 +50,17 @@ class ProfileViewModel : ViewModel() {
     }
 
     fun onLoggedIn(account: Account) {
+        val readOnly = BiliApp.store.csrf().isNullOrBlank()
         _state.update {
-            it.copy(account = account, showLogin = false, message = "已登录：${account.name}")
+            it.copy(
+                account = account,
+                showLogin = false,
+                message = if (readOnly) {
+                    "已登录（只读）：${account.name}，评论与弹幕需要完整 Cookie"
+                } else {
+                    "已登录：${account.name}"
+                },
+            )
         }
     }
 

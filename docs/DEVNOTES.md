@@ -50,3 +50,11 @@
 ```
 
 覆盖 WBI mixin / 签名向量、弹幕 protobuf 解码、弹幕接口返回 JSON 时的容错。
+
+## 8. 登录链路
+
+- **扫码**：`qrcode/generate` 生成二维码，`poll` 返回 `86101/86090/86038/0`。登录成功时部分账号的 `data.url` 为空，必须同时解析响应头 `Set-Cookie`，否则会误报「未取得 Cookie」。
+- **网页登录**：WebView 打开 `passport.bilibili.com/login`，使用标准手机 Chrome UA。登录成功后从 `CookieManager` 读取 `.bilibili.com` 的 Cookie；`shouldInterceptRequest` 里的 `Cookie` 请求头同时兜底 HttpOnly 的 `SESSDATA`。
+- 登录页固定用浅色 `Configuration` 渲染，避免深色模式下协议勾选框不可见；页面加载完成后 1.2 秒轮询一次 Cookie，也可点右上角「完成」手动触发。
+- **Cookie 导入**：只强制要求 `SESSDATA`；没有 `bili_jct` 时按只读登录处理，评论/弹幕会提示需要完整 Cookie。
+- 所有 Cookie 仅写入应用私有 `SharedPreferences`，WebView 与接口会话互不共享。
