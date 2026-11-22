@@ -8,7 +8,9 @@
 
 ## 下载
 
-[Releases](https://github.com/ji1360677347/BiliNative-Android/releases/latest) 提供可直接安装的 APK（使用 debug 签名，正式分发请自行配置签名）。也可以自行构建：`./gradlew assembleDebug`。
+[Releases](https://github.com/ji1360677347/BiliNative-Android/releases/latest) 提供可直接安装的 APK。安装包使用仓库内 `keystore/bili-native.jks` 固定签名，后续版本可直接覆盖安装；该证书仅用于本项目个人分发，请勿用于其他应用或商店上架。
+
+> v0.1.0 使用 CI 临时 debug 签名。若从 v0.1.0 升级提示「签名不一致」，先卸载旧版再安装。也可以自行构建：`./gradlew assembleDebug`。
 
 ## 登录
 

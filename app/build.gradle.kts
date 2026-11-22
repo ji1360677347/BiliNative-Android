@@ -17,14 +17,24 @@ android {
         vectorDrawables.useSupportLibrary = true
     }
 
+    signingConfigs {
+        create("release") {
+            // 仓库内的固定自签名证书：保证后续版本可覆盖安装。
+            // 仅用于本项目的个人分发，不要用于商业或上架。
+            storeFile = rootProject.file("keystore/bili-native.jks")
+            storePassword = "bilinative2026"
+            keyAlias = "bilinative"
+            keyPassword = "bilinative2026"
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
         }
         release {
-            // 非上架项目：使用 debug 签名，保证 CI 也能产出可直接安装的 APK。
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
