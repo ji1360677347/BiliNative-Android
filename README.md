@@ -1,8 +1,14 @@
 # 哔哩轻看 Android（BiliNative Android）
 
+![Android CI](https://github.com/ji1360677347/BiliNative-Android/actions/workflows/android.yml/badge.svg)
+
 哔哩轻看（[BiliNative](https://github.com/ji1360677347/BiliNative)）的 Android 重写版：用 **Kotlin + Jetpack Compose + Media3** 重新实现首页浏览、DASH 播放、弹幕、评论、搜索、动态与账号体系，界面按 B 站 App / 原 iOS 客户端的视觉规范自行绘制。
 
 > 非官方第三方客户端，仅供学习与个人使用。视频、弹幕、评论等内容的版权归哔哩哔哩及原作者所有，请遵守 B 站用户协议，不要用于商业用途或大规模抓取。
+
+## 下载
+
+[Releases](https://github.com/ji1360677347/BiliNative-Android/releases/latest) 提供可直接安装的 APK（v0.1.0 起，使用 debug 签名，正式分发请自行配置签名）。也可以自行构建：`./gradlew assembleDebug`。
 
 | 首页 | 播放与弹幕 |
 | --- | --- |

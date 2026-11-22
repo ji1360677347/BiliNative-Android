@@ -342,7 +342,10 @@ fun PlayerScreen(
                                                 modifier = Modifier
                                                     .clip(CircleShape)
                                                     .background(if (current) colors.pink else colors.fill)
-                                                    .clickable { vm.selectPart(index) }
+                                                    .clickable {
+                                                        exo.pause()
+                                                        vm.selectPart(index)
+                                                    }
                                                     .padding(horizontal = 12.dp, vertical = 6.dp),
                                             )
                                         }
@@ -498,6 +501,7 @@ fun PlayerScreen(
                                 .clip(RoundedCornerShape(6.dp))
                                 .background(if (current) colors.pinkSoft else Color.Transparent)
                                 .clickable {
+                                    exo.pause()
                                     vm.selectPart(index)
                                     showParts = false
                                 }

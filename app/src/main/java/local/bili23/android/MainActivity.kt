@@ -51,6 +51,9 @@ class MainActivity : ComponentActivity() {
 
     private fun videoIdFrom(intent: Intent?): String? {
         val text = intent?.data?.toString() ?: return null
-        return Regex("BV[0-9A-Za-z]{10}").find(text)?.value
+        Regex("BV[0-9A-Za-z]{10}").find(text)?.let { return it.value }
+        // 番剧链接 /bangumi/play/ep123456
+        Regex("ep[0-9]+").find(text)?.let { return it.value }
+        return null
     }
 }
