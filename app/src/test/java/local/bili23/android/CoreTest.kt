@@ -4,6 +4,7 @@ import local.bili23.android.core.DanmakuParser
 import local.bili23.android.core.Wbi
 import local.bili23.android.core.orderedMediaUrls
 import local.bili23.android.core.parseWbiCommentsResponse
+import local.bili23.android.core.videoDuration
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -117,4 +118,9 @@ class CoreTest {
         assertEquals(1002L, page.items[1].id)
     }
 
+    @Test
+    fun `videoDuration supports half and full width colons`() {
+        assertEquals(83, videoDuration(JSONObject("""{"length":"01:23"}""")))
+        assertEquals(3723, videoDuration(JSONObject("""{"duration_text":"1：02：03"}""")))
+    }
 }

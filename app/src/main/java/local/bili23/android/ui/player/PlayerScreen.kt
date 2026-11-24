@@ -67,6 +67,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -75,9 +76,17 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withLink
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -102,6 +111,8 @@ import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import local.bili23.android.BiliApp
+import local.bili23.android.core.CommentInlineParser
+import local.bili23.android.core.CommentInlineRun
 import local.bili23.android.core.Danmaku
 import local.bili23.android.core.Http
 import local.bili23.android.core.MediaTrack
@@ -207,6 +218,14 @@ fun PlayerScreen(
     var showSendDanmaku by remember { mutableStateOf(false) }
     var showParts by remember { mutableStateOf(false) }
 
+    val seekToMs: (Long) -> Unit = { targetMs ->
+        val exoDuration = exo.duration
+        val maxMs = if (exoDuration != C.TIME_UNSET && exoDuration > 0) exoDuration else 0L
+        val clamped = if (maxMs > 0L) targetMs.coerceIn(0L, maxMs) else targetMs.coerceAtLeast(0L)
+        exo.seekTo(clamped)
+        positionMs = clamped
+    }
+
     val stageModifier = if (fullscreen) Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(16f / 9f)
     val stage: @Composable () -> Unit = {
         PlayerStage(
@@ -231,7 +250,7 @@ fun PlayerScreen(
             },
             onToggleFullscreen = { fullscreen = !fullscreen },
             onTogglePlay = { if (exo.isPlaying) exo.pause() else exo.play() },
-            onSeek = { exo.seekTo(it) },
+            onSeek = seekToMs,
             onQuality = vm::selectQuality,
             onSpeed = {
                 BiliApp.store.speed = it
@@ -430,6 +449,8 @@ fun PlayerScreen(
                                 loadingReplies = state.replyLoading.contains(comment.id),
                                 onLike = { vm.likeComment(comment) },
                                 onLoadReplies = { vm.loadReplies(comment.id) },
+                                onSeek = seekToMs,
+                                onOpenVideo = { bvid -> onOpen(Video(bvid = bvid, title = "")) },
                             )
                         }
                         item {
@@ -1045,6 +1066,8 @@ private fun CommentItem(
     loadingReplies: Boolean,
     onLike: () -> Unit,
     onLoadReplies: () -> Unit,
+    onSeek: (Long) -> Unit,
+    onOpenVideo: (String) -> Unit,
 ) {
     val colors = AppColors.current
     Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp)) {
@@ -1074,11 +1097,13 @@ private fun CommentItem(
                 )
             }
             Spacer(Modifier.height(4.dp))
-            Text(
+            CommentRichText(
                 text = comment.message,
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.text1,
                 lineHeight = 20.sp,
+                onSeek = onSeek,
+                onOpenVideo = onOpenVideo,
             )
             if (comment.pictures.isNotEmpty()) {
                 Spacer(Modifier.height(6.dp))
@@ -1122,12 +1147,15 @@ private fun CommentItem(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     comment.previews.forEach { preview ->
-                        Text(
-                            text = "${preview.name}：${preview.message}",
+                        CommentRichText(
+                            prefix = "${preview.name}：",
+                            text = preview.message,
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.text2,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
+                            onSeek = onSeek,
+                            onOpenVideo = onOpenVideo,
                         )
                     }
                     if (comment.replyCount > comment.previews.size) {
@@ -1150,10 +1178,13 @@ private fun CommentItem(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     replies.forEach { reply ->
-                        Text(
-                            text = "${reply.name}：${reply.message}",
+                        CommentRichText(
+                            prefix = "${reply.name}：",
+                            text = reply.message,
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.text2,
+                            onSeek = onSeek,
+                            onOpenVideo = onOpenVideo,
                         )
                     }
                 }
@@ -1167,6 +1198,93 @@ private fun CommentItem(
             }
         }
     }
+}
+
+@Composable
+private fun CommentRichText(
+    text: String,
+    modifier: Modifier = Modifier,
+    prefix: String = "",
+    style: TextStyle = MaterialTheme.typography.bodyMedium,
+    color: Color = AppColors.current.text1,
+    lineHeight: TextUnit = TextUnit.Unspecified,
+    maxLines: Int = Int.MAX_VALUE,
+    overflow: TextOverflow = TextOverflow.Clip,
+    onSeek: (Long) -> Unit,
+    onOpenVideo: (String) -> Unit,
+) {
+    val colors = AppColors.current
+    val uriHandler = LocalUriHandler.current
+    val currentOnSeek by rememberUpdatedState(onSeek)
+    val currentOnOpenVideo by rememberUpdatedState(onOpenVideo)
+    val currentUriHandler by rememberUpdatedState(uriHandler)
+    val runs = remember(text) { CommentInlineParser.parse(text) }
+    val linkStyles = remember(colors.blue) {
+        TextLinkStyles(style = SpanStyle(color = colors.blue))
+    }
+    val annotated = remember(prefix, runs, linkStyles) {
+        buildAnnotatedString {
+            if (prefix.isNotEmpty()) append(prefix)
+            runs.forEachIndexed { index, run ->
+                when (run) {
+                    is CommentInlineRun.Text -> append(run.text)
+                    is CommentInlineRun.Timestamp -> {
+                        withLink(
+                            LinkAnnotation.Clickable(
+                                tag = "ts-$index",
+                                styles = linkStyles,
+                                linkInteractionListener = {
+                                    currentOnSeek((run.seconds * 1000.0).toLong().coerceAtLeast(0L))
+                                },
+                            )
+                        ) {
+                            append(run.text)
+                        }
+                    }
+                    is CommentInlineRun.Video -> {
+                        withLink(
+                            LinkAnnotation.Clickable(
+                                tag = "bv-$index",
+                                styles = linkStyles,
+                                linkInteractionListener = {
+                                    currentOnOpenVideo(run.bvid)
+                                },
+                            )
+                        ) {
+                            append(run.text)
+                        }
+                    }
+                    is CommentInlineRun.Url -> {
+                        withLink(
+                            LinkAnnotation.Clickable(
+                                tag = "url-$index",
+                                styles = linkStyles,
+                                linkInteractionListener = {
+                                    val bvid = CommentInlineParser.extractBvidFromUrl(run.url)
+                                    if (bvid != null) {
+                                        currentOnOpenVideo(bvid)
+                                    } else {
+                                        runCatching { currentUriHandler.openUri(run.url) }
+                                    }
+                                },
+                            )
+                        ) {
+                            append(run.text)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Text(
+        text = annotated,
+        style = style,
+        color = color,
+        lineHeight = lineHeight,
+        maxLines = maxLines,
+        overflow = overflow,
+        modifier = modifier,
+    )
 }
 
 @Composable

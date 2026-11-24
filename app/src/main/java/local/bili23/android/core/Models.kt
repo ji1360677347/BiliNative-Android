@@ -282,7 +282,7 @@ fun videoDuration(json: JSONObject): Int {
         when (val value = json.opt(key)) {
             is Number -> if (value.toInt() > 0) return value.toInt()
             is String -> {
-                val parts = value.trim().split(":")
+                val parts = value.trim().split(':', '：')
                 if (parts.size in 1..3) {
                     var total = 0
                     var valid = true
