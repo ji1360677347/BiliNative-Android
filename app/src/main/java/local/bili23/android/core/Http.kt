@@ -8,7 +8,11 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-class BiliException(message: String) : Exception(message)
+class BiliException(
+    message: String,
+    val code: Int? = null,
+    val httpStatus: Int? = null,
+) : Exception(message)
 
 /** 全局 HTTP 出口：统一 UA / Referer，Cookie 由调用方显式传入，不做隐式持久化。 */
 object Http {
@@ -63,7 +67,7 @@ object Http {
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 val hint = body.replace(Regex("\\s+"), " ").take(140)
-                throw BiliException("网络请求失败（HTTP ${response.code}）${hint}")
+                throw BiliException("网络请求失败（HTTP ${response.code}）${hint}", httpStatus = response.code)
             }
             body
         }

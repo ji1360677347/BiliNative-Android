@@ -2,12 +2,82 @@ package local.bili23.android.core
 
 import android.util.Log
 import local.bili23.android.BuildConfig
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.IOException
+
+fun orderedMediaUrls(urls: List<String>): List<String> {
+    val (standard, deprioritized) = urls.partition { url ->
+        val host = url.substringAfter("://", "").substringBefore('/').substringBefore(':').lowercase()
+        !host.contains(".mcdn.") &&
+            !host.startsWith("mcdn.") &&
+            !host.contains(".pcdn.") &&
+            !host.startsWith("pcdn.") &&
+            !host.contains("szbdyd")
+    }
+    return standard + deprioritized
+}
+
+internal fun parseCommentJson(json: JSONObject, depth: Int): VideoComment? {
+    val rpid = json.long("rpid").takeIf { it > 0 } ?: json.str("rpid_str").toLongOrNull() ?: return null
+    val member = json.obj("member") ?: JSONObject()
+    val content = json.obj("content") ?: JSONObject()
+    val vip = member.obj("vip") ?: JSONObject()
+    val level = (member.obj("level_info") ?: JSONObject()).int("current_level")
+    val previews = if (depth == 0) {
+        json.arr("replies").objects().take(3).mapNotNull { parseCommentJson(it, 1) }
+    } else emptyList()
+    return VideoComment(
+        id = rpid,
+        name = member.str("uname", "用户"),
+        avatar = normalizeUrl(member.str("avatar")),
+        message = content.str("message"),
+        likes = json.int("like"),
+        created = json.long("ctime"),
+        mid = member.long("mid"),
+        level = level,
+        isVip = vip.int("vipStatus") == 1,
+        replyCount = json.int("rcount"),
+        location = (json.obj("reply_control") ?: JSONObject()).str("location"),
+        previews = previews,
+        pictures = content.arr("pictures").objects().map { normalizeUrl(it.str("img_src")) }.filter { it.isNotBlank() },
+    )
+}
+
+internal fun parseWbiCommentsResponse(data: JSONObject, includeTop: Boolean = true): CommentPage {
+    val items = mutableListOf<VideoComment>()
+    val seen = HashSet<Long>()
+    if (includeTop) {
+        data.obj("top")?.obj("upper")?.let { parseCommentJson(it, 0) }?.let { top ->
+            if (seen.add(top.id)) items += top
+        }
+    }
+    for (obj in data.arr("replies").objects()) {
+        val comment = parseCommentJson(obj, 0) ?: continue
+        if (seen.add(comment.id)) items += comment
+    }
+    val cursor = data.obj("cursor")
+    val nextOffset = cursor?.obj("pagination_reply")?.str("next_offset")?.ifBlank { null }
+    val allCount = cursor?.int("all_count") ?: 0
+    val cursorEnd = cursor?.bool("is_end") ?: true
+    val isEnd = cursorEnd || nextOffset == null || (items.isEmpty() && allCount == 0)
+    return CommentPage(
+        items = items,
+        isEnd = isEnd,
+        nextOffset = nextOffset,
+        usedWbi = true,
+    )
+}
 
 /**
  * B 站 Web 接口封装。所有请求都带设备 Cookie（buvid3/buvid4），
@@ -19,16 +89,32 @@ class BiliClient(private val store: Store) {
     private var wbiAt = 0L
     private val deviceMutex = Mutex()
     private val memberRefreshMutex = Mutex()
+    private val bgScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val aidCache = object : LinkedHashMap<String, Long>(128, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>?): Boolean = size > 256
+    }
+
+    private fun cacheAid(bvid: String, aid: Long) {
+        if (bvid.isNotBlank() && aid > 0L) {
+            synchronized(aidCache) { aidCache[bvid] = aid }
+        }
+    }
+
+    private fun cachedAid(bvid: String): Long? {
+        if (bvid.isBlank()) return null
+        return synchronized(aidCache) { aidCache[bvid] }
+    }
 
     // ---------- 基础请求 ----------
 
     private fun errorFor(root: JSONObject, code: Int): BiliException {
         val message = root.str("message", "请求失败")
         return when (code) {
-            -101 -> BiliException("Cookie 已失效，请重新登录或导入")
-            -352, -412, -403 -> BiliException("Bilibili 暂时限制了请求，请稍后重试（$code）")
-            -111 -> BiliException("CSRF 校验失败，请重新登录")
-            else -> BiliException("$message（$code）")
+            -101 -> BiliException("Cookie 已失效，请重新登录或导入", code = code)
+            -352, -412, -403 -> BiliException("Bilibili 暂时限制了请求，请稍后重试（$code）", code = code)
+            -111 -> BiliException("CSRF 校验失败，请重新登录", code = code)
+            12002 -> BiliException("评论区已关闭", code = code)
+            else -> BiliException("$message（$code）", code = code)
         }
     }
 
@@ -36,7 +122,7 @@ class BiliClient(private val store: Store) {
 
     private suspend fun raw(path: String, query: Map<String, String> = emptyMap(), role: Identity? = null): JSONObject {
         // 首次启动往往在 Wi-Fi 就绪前发出请求，buvid 拿不到会导致后续接口 412，这里按需补取。
-        if (store.buvid3.isBlank()) runCatching { ensureDevice() }
+        if (store.buvid3.isBlank() || store.buvid4.isBlank()) runCatching { ensureDevice() }
         val url = Http.apiUrl(path, query)
         if (BuildConfig.DEBUG) Log.d("BiliApi", "GET $url")
         val text = Http.get(url, cookieFor(role))
@@ -79,9 +165,9 @@ class BiliClient(private val store: Store) {
 
     /** 首次启动取一次 buvid3 / buvid4，游客访问也更容易通过风控。 */
     suspend fun ensureDevice() {
-        if (store.buvid3.isNotBlank()) return
+        if (store.buvid3.isNotBlank() && store.buvid4.isNotBlank()) return
         deviceMutex.withLock {
-            if (store.buvid3.isNotBlank()) return@withLock
+            if (store.buvid3.isNotBlank() && store.buvid4.isNotBlank()) return@withLock
             val text = Http.get("${Http.API}/x/frontend/finger/spi", store.deviceCookie)
             val data = runCatching { JSONObject(text).obj("data") }.getOrNull() ?: return@withLock
             val b3 = data.str("b_3")
@@ -313,8 +399,9 @@ class BiliClient(private val store: Store) {
             val episodes = data.arr("episodes").objects()
             val target = episodes.firstOrNull { it.int("id") == episode } ?: episodes.firstOrNull()
                 ?: throw BiliException("没有可播放的分集")
-            return Video(
+            val result = Video(
                 bvid = target.str("bvid"),
+                aid = target.long("aid"),
                 cid = target.long("cid"),
                 title = cleanText(data.str("title", video.title)),
                 cover = normalizeUrl(data.str("cover")),
@@ -330,9 +417,12 @@ class BiliClient(private val store: Store) {
                     )
                 },
             )
+            cacheAid(result.bvid, result.aid)
+            return result
         }
         val data = api("/x/web-interface/view", mapOf("bvid" to video.bvid), role = Identity.PERSONAL)
         val parsed = parseVideo(data) ?: throw BiliException("视频不存在或暂不可见")
+        cacheAid(parsed.bvid, parsed.aid)
         return parsed.copy(cid = parsed.cid.takeIf { it > 0 } ?: video.cid)
     }
 
@@ -352,10 +442,12 @@ class BiliClient(private val store: Store) {
         val backups = json.arr("backupUrl").let { array ->
             if (array.length() == 0) json.arr("backup_url") else array
         }.let { array -> (0 until array.length()).map { array.optString(it) } }
-        val urls = (listOf(base) + backups)
-            .map { normalizeUrl(it) }
-            .filter { it.startsWith("https://") && isMediaHost(it) }
-            .distinct()
+        val urls = orderedMediaUrls(
+            (listOf(base) + backups)
+                .map { normalizeUrl(it) }
+                .filter { it.startsWith("https://") && isMediaHost(it) }
+                .distinct()
+        )
         if (urls.isEmpty()) return null
         return MediaTrack(
             quality = json.int("id"),
@@ -433,14 +525,15 @@ class BiliClient(private val store: Store) {
         if (cid <= 0) throw BiliException("视频分集信息缺失")
         var notice: String? = null
         if (preference != PlaybackPreference.PERSONAL && store.memberApiUrl.isNotBlank()) {
-            val due = store.memberCookie.isBlank() ||
-                System.currentTimeMillis() - store.memberRefreshedAt >= 6 * 3_600_000L
-            if (due) {
+            if (store.memberCookie.isBlank()) {
                 try {
                     refreshMemberFromApi()
                 } catch (e: Exception) {
                     notice = "会员源自动刷新失败：${e.message}"
                 }
+            } else if (System.currentTimeMillis() - store.memberRefreshedAt >= 6 * 3_600_000L) {
+                // 已有缓存会员 Cookie 时不阻塞首帧请求，后台异步刷新即可。
+                bgScope.launch { runCatching { refreshMemberFromApi() } }
             }
         }
         if (preference != PlaybackPreference.PERSONAL && store.memberCookie.isNotBlank()) {
@@ -448,6 +541,17 @@ class BiliClient(private val store: Store) {
                 val memberSource = fetchPlayback(video, cid, quality, Identity.MEMBER)
                 return memberSource.copy(notice = notice)
             } catch (e: Exception) {
+                val canSyncRetry = store.memberApiUrl.isNotBlank() &&
+                    ((e as? BiliException)?.code == -101 ||
+                        System.currentTimeMillis() - store.memberRefreshedAt >= 60_000L)
+                if (canSyncRetry) {
+                    val refreshed = runCatching { refreshMemberFromApi() }.isSuccess
+                    if (refreshed) {
+                        runCatching {
+                            return fetchPlayback(video, cid, quality, Identity.MEMBER).copy(notice = notice)
+                        }
+                    }
+                }
                 if (preference == PlaybackPreference.MEMBER) {
                     throw BiliException("会员源不可用：${e.message}")
                 }
@@ -527,54 +631,172 @@ class BiliClient(private val store: Store) {
 
     // ---------- 评论 ----------
 
-    private fun parseComment(json: JSONObject, depth: Int): VideoComment? {
-        val rpid = json.long("rpid").takeIf { it > 0 } ?: json.str("rpid_str").toLongOrNull() ?: return null
-        val member = json.obj("member") ?: JSONObject()
-        val content = json.obj("content") ?: JSONObject()
-        val vip = member.obj("vip") ?: JSONObject()
-        val level = (member.obj("level_info") ?: JSONObject()).int("current_level")
-        val previews = if (depth == 0) {
-            json.arr("replies").objects().take(3).mapNotNull { parseComment(it, 1) }
-        } else emptyList()
-        return VideoComment(
-            id = rpid,
-            name = member.str("uname", "用户"),
-            avatar = normalizeUrl(member.str("avatar")),
-            message = content.str("message"),
-            likes = json.int("like"),
-            created = json.long("ctime"),
-            mid = member.long("mid"),
-            level = level,
-            isVip = vip.int("vipStatus") == 1,
-            replyCount = json.int("rcount"),
-            location = (json.obj("reply_control") ?: JSONObject()).str("location"),
-            previews = previews,
-            pictures = content.arr("pictures").objects().map { normalizeUrl(it.str("img_src")) }.filter { it.isNotBlank() },
-        )
+    private fun parseComment(json: JSONObject, depth: Int): VideoComment? =
+        parseCommentJson(json, depth)
+
+    private fun isTransientOrRiskError(e: Throwable): Boolean {
+        if (e is IOException) return true
+        if (e is BiliException) {
+            if (e.httpStatus == 412 || (e.httpStatus != null && e.httpStatus >= 500)) return true
+            if (e.code in setOf(-352, -412, -403)) return true
+        }
+        return false
+    }
+
+    private fun shouldFallbackToWbi(e: Throwable): Boolean {
+        if (e is BiliException && e.code == 12002) return false
+        if (e is IOException) return true
+        if (e is BiliException) {
+            if (e.httpStatus == 412 || (e.httpStatus != null && e.httpStatus >= 500)) return true
+            if (e.code in setOf(-352, -412, -403, -101)) return true
+        }
+        return false
+    }
+
+    private suspend fun apiWithRetry(
+        path: String,
+        queryProvider: suspend () -> Map<String, String>,
+        role: Identity? = Identity.PERSONAL,
+    ): JSONObject {
+        val effectiveRole = role?.takeIf {
+            when (it) {
+                Identity.PERSONAL -> store.personalCookie
+                Identity.MEMBER -> store.memberCookie
+            }.isNotBlank()
+        }
+        suspend fun attempt(currentRole: Identity?): JSONObject {
+            val query = queryProvider()
+            return api(path, query, role = currentRole, allowGuest = false)
+        }
+        suspend fun attemptWithGuest(): JSONObject {
+            return try {
+                attempt(effectiveRole)
+            } catch (e: BiliException) {
+                if (e.code == -101 && effectiveRole != null) {
+                    attempt(null)
+                } else {
+                    throw e
+                }
+            }
+        }
+        return try {
+            attemptWithGuest()
+        } catch (e: Exception) {
+            if (isTransientOrRiskError(e)) {
+                delay(250)
+                attemptWithGuest()
+            } else {
+                throw e
+            }
+        }
     }
 
     private suspend fun aidOf(video: Video): Long {
-        if (video.aid > 0) return video.aid
+        if (video.aid > 0) {
+            cacheAid(video.bvid, video.aid)
+            return video.aid
+        }
+        cachedAid(video.bvid)?.let { return it }
         if (video.bvid.isBlank()) throw BiliException("视频信息缺失")
-        val data = api("/x/web-interface/view", mapOf("bvid" to video.bvid), role = Identity.PERSONAL)
-        return data.long("aid").takeIf { it > 0 } ?: throw BiliException("无法取得视频编号")
+        val data = api("/x/web-interface/view", mapOf("bvid" to video.bvid), role = Identity.PERSONAL, allowGuest = true)
+        val aid = data.long("aid").takeIf { it > 0 } ?: throw BiliException("无法取得视频编号")
+        cacheAid(video.bvid, aid)
+        return aid
     }
 
-    suspend fun comments(video: Video, page: Int = 1): List<VideoComment> {
+    suspend fun comments(
+        video: Video,
+        page: Int = 1,
+        nextOffset: String? = null,
+        useWbi: Boolean = false,
+        sort: Int = 2,
+    ): CommentPage {
         val aid = aidOf(video)
-        val data = api(
-            "/x/v2/reply",
-            mapOf("type" to "1", "oid" to aid.toString(), "pn" to page.toString(), "ps" to "20", "sort" to "2"),
+        if (!useWbi && nextOffset == null) {
+            var legacyFallback = false
+            try {
+                val data = apiWithRetry(
+                    path = "/x/v2/reply",
+                    queryProvider = {
+                        mapOf(
+                            "type" to "1",
+                            "oid" to aid.toString(),
+                            "pn" to page.toString(),
+                            "ps" to "20",
+                            "sort" to sort.toString(),
+                        )
+                    },
+                    role = Identity.PERSONAL,
+                )
+                val items = mutableListOf<VideoComment>()
+                val seen = HashSet<Long>()
+                if (page == 1) {
+                    data.obj("top")?.obj("upper")?.let { parseComment(it, 0) }?.let { top ->
+                        if (seen.add(top.id)) items += top
+                    }
+                }
+                for (obj in data.arr("replies").objects()) {
+                    val comment = parseComment(obj, 0) ?: continue
+                    if (seen.add(comment.id)) items += comment
+                }
+                val total = data.obj("page")?.int("count") ?: 0
+                if (page == 1 && items.isEmpty() && (total == 0 || sort == 0)) {
+                    legacyFallback = true
+                } else {
+                    return CommentPage(
+                        items = items,
+                        isEnd = items.isEmpty(),
+                        nextOffset = null,
+                        usedWbi = false,
+                    )
+                }
+            } catch (e: Exception) {
+                if (shouldFallbackToWbi(e)) {
+                    legacyFallback = true
+                } else {
+                    throw e
+                }
+            }
+            if (!legacyFallback) {
+                return CommentPage(emptyList(), isEnd = true)
+            }
+        }
+
+        val mode = if (sort == 0) "2" else "3"
+        val paginationStr = JSONObject().put("offset", nextOffset.orEmpty()).toString()
+        val data = apiWithRetry(
+            path = "/x/v2/reply/wbi/main",
+            queryProvider = {
+                signed(
+                    mapOf(
+                        "oid" to aid.toString(),
+                        "type" to "1",
+                        "mode" to mode,
+                        "plat" to "1",
+                        "seek_rpid" to "",
+                        "web_location" to "1315875",
+                        "pagination_str" to paginationStr,
+                    )
+                )
+            },
             role = Identity.PERSONAL,
         )
-        return data.arr("replies").objects().mapNotNull { parseComment(it, 0) }
+        return parseWbiCommentsResponse(data, includeTop = nextOffset.isNullOrBlank())
     }
 
     suspend fun commentReplies(video: Video, root: Long, page: Int = 1): List<VideoComment> {
         val aid = aidOf(video)
-        val data = api(
-            "/x/v2/reply/reply",
-            mapOf("type" to "1", "oid" to aid.toString(), "root" to root.toString(), "pn" to page.toString(), "ps" to "20"),
+        val data = apiWithRetry(
+            path = "/x/v2/reply/reply",
+            queryProvider = {
+                mapOf(
+                    "type" to "1",
+                    "oid" to aid.toString(),
+                    "root" to root.toString(),
+                    "pn" to page.toString(),
+                    "ps" to "20",
+                )
+            },
             role = Identity.PERSONAL,
         )
         return data.arr("replies").objects().mapNotNull { parseComment(it, 1) }

@@ -4,8 +4,11 @@ import android.util.Log
 import local.bili23.android.BuildConfig
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import local.bili23.android.BiliApp
 import local.bili23.android.core.BiliException
@@ -32,7 +35,10 @@ class PlayerViewModel(
         val comments: List<VideoComment> = emptyList(),
         val commentsLoading: Boolean = false,
         val commentsEnd: Boolean = false,
+        val commentsError: String? = null,
         val commentPage: Int = 1,
+        val commentNextOffset: String? = null,
+        val commentsUseWbi: Boolean = false,
         val danmaku: List<Danmaku> = emptyList(),
         val danmakuOn: Boolean = true,
         val liked: Boolean = false,
@@ -54,37 +60,74 @@ class PlayerViewModel(
 
     fun load() {
         viewModelScope.launch {
-            _state.value = _state.value.copy(loading = true, error = null)
+            _state.update { it.copy(loading = true, error = null) }
             try {
-                val detail = BiliApp.client.detail(base)
-                if (BuildConfig.DEBUG) Log.d("BiliPlayer", "route=$routeId cid=${detail.cid} parts=${detail.parts.size}")
-                val cid = initialCid.takeIf { it > 0 } ?: detail.cid
-                if (cid <= 0) throw BiliException("视频分集信息缺失")
-                val video = detail.copy(cid = cid)
-                _state.value = _state.value.copy(video = video)
+                if (initialCid > 0) {
+                    coroutineScope {
+                        val detailDeferred = async { runCatching { BiliApp.client.detail(base) }.getOrNull() }
+                        val playbackDeferred = async {
+                            BiliApp.client.playback(
+                                video = base.copy(cid = initialCid),
+                                cid = initialCid,
+                                quality = 127,
+                                preference = BiliApp.store.preference,
+                            )
+                        }
+                        val source = playbackDeferred.await()
+                        val quality = source.video(BiliApp.store.quality)?.quality
+                            ?: source.qualities.firstOrNull() ?: 0
+                        _state.update {
+                            it.copy(
+                                loading = false,
+                                video = it.video ?: base.copy(cid = initialCid),
+                                source = source,
+                                selectedQuality = quality,
+                                notice = source.notice,
+                            )
+                        }
+                        val detail = detailDeferred.await()
+                        val video = (detail ?: base).copy(cid = initialCid)
+                        if (BuildConfig.DEBUG) Log.d("BiliPlayer", "route=$routeId cid=$initialCid parts=${video.parts.size}")
+                        _state.update { it.copy(video = video) }
+                        loadRelated(video)
+                        loadComments(reset = true)
+                        loadDanmaku(initialCid, video.duration)
+                    }
+                } else {
+                    val detail = BiliApp.client.detail(base)
+                    if (BuildConfig.DEBUG) Log.d("BiliPlayer", "route=$routeId cid=${detail.cid} parts=${detail.parts.size}")
+                    val cid = detail.cid
+                    if (cid <= 0) throw BiliException("视频分集信息缺失")
+                    val video = detail.copy(cid = cid)
+                    _state.update { it.copy(video = video) }
+                    loadRelated(video)
+                    loadComments(reset = true)
+                    loadDanmaku(cid, video.duration)
 
-                val source = BiliApp.client.playback(
-                    video = video,
-                    cid = cid,
-                    quality = 127,
-                    preference = BiliApp.store.preference,
-                )
-                val quality = source.video(BiliApp.store.quality)?.quality
-                    ?: source.qualities.firstOrNull() ?: 0
-                _state.value = _state.value.copy(
-                    loading = false,
-                    source = source,
-                    selectedQuality = quality,
-                    notice = source.notice,
-                )
-                loadRelated(video)
-                loadComments(reset = true)
-                loadDanmaku(cid, video.duration)
+                    val source = BiliApp.client.playback(
+                        video = video,
+                        cid = cid,
+                        quality = 127,
+                        preference = BiliApp.store.preference,
+                    )
+                    val quality = source.video(BiliApp.store.quality)?.quality
+                        ?: source.qualities.firstOrNull() ?: 0
+                    _state.update {
+                        it.copy(
+                            loading = false,
+                            source = source,
+                            selectedQuality = quality,
+                            notice = source.notice,
+                        )
+                    }
+                }
             } catch (e: Exception) {
-                _state.value = _state.value.copy(
-                    loading = false,
-                    error = e.message ?: "加载失败",
-                )
+                _state.update {
+                    it.copy(
+                        loading = false,
+                        error = e.message ?: "加载失败",
+                    )
+                }
             }
         }
     }
@@ -103,6 +146,8 @@ class PlayerViewModel(
         }
     }
 
+    fun retryComments() = loadComments(reset = true)
+
     fun loadComments(reset: Boolean = false) {
         val video = _state.value.video ?: return
         val current = _state.value
@@ -110,19 +155,44 @@ class PlayerViewModel(
         if (!reset && current.commentsEnd) return
         if (video.aid <= 0 && video.bvid.isBlank()) return
         val page = if (reset) 1 else current.commentPage + 1
-        _state.value = current.copy(commentsLoading = true)
+        val nextOffset = if (reset) null else current.commentNextOffset
+        val useWbi = if (reset) false else current.commentsUseWbi
+        _state.update {
+            it.copy(
+                commentsLoading = true,
+                commentsError = null,
+                commentNextOffset = if (reset) null else it.commentNextOffset,
+                commentsUseWbi = if (reset) false else it.commentsUseWbi,
+            )
+        }
         viewModelScope.launch {
             try {
-                val list = BiliApp.client.comments(video, page)
-                _state.value = _state.value.copy(
-                    comments = if (reset) list else (_state.value.comments + list).distinctBy { it.id },
-                    commentsLoading = false,
-                    commentsEnd = list.isEmpty(),
-                    commentPage = page,
+                val result = BiliApp.client.comments(
+                    video = video,
+                    page = page,
+                    nextOffset = nextOffset,
+                    useWbi = useWbi,
                 )
+                _state.update {
+                    it.copy(
+                        comments = if (reset) result.items else (it.comments + result.items).distinctBy { item -> item.id },
+                        commentsLoading = false,
+                        commentsEnd = result.isEnd,
+                        commentsError = null,
+                        commentPage = page,
+                        commentNextOffset = result.nextOffset,
+                        commentsUseWbi = result.usedWbi,
+                    )
+                }
             } catch (e: Exception) {
-                _state.value = _state.value.copy(commentsLoading = false)
-                if (reset) toast(e.message ?: "评论加载失败")
+                val msg = e.message ?: "评论加载失败"
+                _state.update {
+                    it.copy(
+                        commentsLoading = false,
+                        commentsError = if (reset || it.comments.isEmpty()) msg else it.commentsError,
+                    )
+                }
+                if (!reset && _state.value.comments.isNotEmpty()) toast(msg)
             }
         }
     }

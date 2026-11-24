@@ -408,12 +408,19 @@ fun PlayerScreen(
                         }
                         if (state.comments.isEmpty() && !state.commentsLoading) {
                             item {
-                                Text(
-                                    text = "还没有评论，来抢沙发吧",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = colors.text3,
-                                    modifier = Modifier.padding(24.dp),
-                                )
+                                if (state.commentsError != null) {
+                                    ErrorBox(
+                                        message = state.commentsError ?: "评论加载失败",
+                                        onRetry = vm::retryComments,
+                                    )
+                                } else {
+                                    Text(
+                                        text = "还没有评论，来抢沙发吧",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = colors.text3,
+                                        modifier = Modifier.padding(24.dp),
+                                    )
+                                }
                             }
                         }
                         items(state.comments, key = { it.id }) { comment ->
@@ -437,7 +444,7 @@ fun PlayerScreen(
                                         color = colors.pink,
                                     )
                                 }
-                            } else if (!state.commentsEnd) {
+                            } else if (!state.commentsEnd && state.comments.isNotEmpty()) {
                                 Text(
                                     text = "加载更多评论",
                                     style = MaterialTheme.typography.bodyMedium,

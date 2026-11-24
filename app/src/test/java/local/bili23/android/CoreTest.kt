@@ -2,7 +2,11 @@ package local.bili23.android
 
 import local.bili23.android.core.DanmakuParser
 import local.bili23.android.core.Wbi
+import local.bili23.android.core.orderedMediaUrls
+import local.bili23.android.core.parseWbiCommentsResponse
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -46,4 +50,71 @@ class CoreTest {
         val json = """{"code":-352,"message":"blocked"}""".toByteArray()
         assertTrue(DanmakuParser.parse(json).isEmpty())
     }
+
+    @Test
+    fun `orderedMediaUrls prioritizes standard CDN over mcdn pcdn and szbdyd`() {
+        val input = listOf(
+            "https://123-45-67-89.mcdn.bilivideo.cn/v1.m4s",
+            "https://upos-sz-mirrorcos.bilivideo.com/v2.m4s",
+            "https://xy123.pcdn.bilivideo.cn/v3.m4s",
+            "https://upos-sz-staticcos.szbdyd.com/v4.m4s",
+            "https://cn-gdgz-cm-01.bilivideo.com/v5.m4s",
+        )
+        assertEquals(
+            listOf(
+                "https://upos-sz-mirrorcos.bilivideo.com/v2.m4s",
+                "https://cn-gdgz-cm-01.bilivideo.com/v5.m4s",
+                "https://123-45-67-89.mcdn.bilivideo.cn/v1.m4s",
+                "https://xy123.pcdn.bilivideo.cn/v3.m4s",
+                "https://upos-sz-staticcos.szbdyd.com/v4.m4s",
+            ),
+            orderedMediaUrls(input),
+        )
+    }
+
+    @Test
+    fun `wbi comments response parses cursor and top upper`() {
+        val json = JSONObject(
+            """
+            {
+              "cursor": {
+                "all_count": 42,
+                "is_end": false,
+                "pagination_reply": {
+                  "next_offset": "{\"type\":3,\"direction\":1}"
+                }
+              },
+              "top": {
+                "upper": {
+                  "rpid": 1001,
+                  "like": 88,
+                  "ctime": 1700000000,
+                  "rcount": 2,
+                  "member": {"uname": "UP主", "mid": 7, "avatar": "//i0.hdslb.com/up.jpg", "level_info": {"current_level": 6}},
+                  "content": {"message": "置顶 1：23"}
+                }
+              },
+              "replies": [
+                {
+                  "rpid": 1002,
+                  "like": 12,
+                  "ctime": 1700000100,
+                  "rcount": 0,
+                  "member": {"uname": "路人", "mid": 8, "avatar": "https://i0.hdslb.com/a.jpg", "level_info": {"current_level": 4}},
+                  "content": {"message": "支持 BV1xx411c7mD"}
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+        val page = parseWbiCommentsResponse(json, includeTop = true)
+        assertFalse(page.isEnd)
+        assertTrue(page.usedWbi)
+        assertEquals("""{"type":3,"direction":1}""", page.nextOffset)
+        assertEquals(2, page.items.size)
+        assertEquals(1001L, page.items[0].id)
+        assertEquals("置顶 1：23", page.items[0].message)
+        assertEquals(1002L, page.items[1].id)
+    }
+
 }

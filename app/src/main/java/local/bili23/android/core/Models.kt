@@ -166,6 +166,13 @@ data class FavoriteFolder(val id: Int, val title: String, val count: Int, val co
 
 data class VideoPage(val videos: List<Video>, val hasMore: Boolean, val cursor: String? = null)
 
+data class CommentPage(
+    val items: List<VideoComment>,
+    val isEnd: Boolean,
+    val nextOffset: String? = null,
+    val usedWbi: Boolean = false,
+)
+
 data class FollowedAccount(val mid: Int, val name: String, val avatar: String, val sign: String)
 
 data class QRLogin(val url: String, val key: String)
