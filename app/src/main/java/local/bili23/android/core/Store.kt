@@ -2,6 +2,9 @@ package local.bili23.android.core
 
 import android.content.Context
 import android.content.SharedPreferences
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -10,9 +13,15 @@ class Store(context: Context) {
     private val sp: SharedPreferences =
         context.getSharedPreferences("bili_native", Context.MODE_PRIVATE)
 
+    private val _personalCookieFlow = MutableStateFlow(sp.getString("cookie.personal", "").orEmpty())
+    val personalCookieFlow: StateFlow<String> = _personalCookieFlow.asStateFlow()
+
     var personalCookie: String
         get() = sp.getString("cookie.personal", "").orEmpty()
-        set(value) = sp.edit().putString("cookie.personal", value).apply()
+        set(value) {
+            sp.edit().putString("cookie.personal", value).apply()
+            _personalCookieFlow.value = value
+        }
 
     var memberCookie: String
         get() = sp.getString("cookie.member", "").orEmpty()

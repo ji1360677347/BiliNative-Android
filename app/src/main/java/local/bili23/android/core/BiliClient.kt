@@ -1018,6 +1018,34 @@ class BiliClient(private val store: Store) {
         }
     }
 
+    suspend fun followingMids(maxPages: Int = 5): Set<Int>? {
+        if (store.personalCookie.isBlank()) return emptySet()
+        return try {
+            val account = account(Identity.PERSONAL) ?: return emptySet()
+            val result = LinkedHashSet<Int>()
+            val pages = maxPages.coerceAtLeast(1)
+            for (page in 1..pages) {
+                val data = api(
+                    "/x/relation/followings",
+                    mapOf("vmid" to account.mid.toString(), "pn" to page.toString(), "ps" to "50", "order" to "desc"),
+                    role = Identity.PERSONAL,
+                )
+                val list = data.arr("list").objects()
+                for (item in list) {
+                    val mid = item.int("mid")
+                    if (mid > 0) result += mid
+                }
+                val total = data.int("total")
+                if (list.size < 50 || (total > 0 && result.size >= total)) break
+            }
+            result
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     suspend fun uploaderVideos(mid: Int, page: Int = 1): VideoPage {
         val query = signed(
             mapOf(

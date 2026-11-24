@@ -61,10 +61,27 @@ fun Cover(
 }
 
 @Composable
+fun FollowedTag(modifier: Modifier = Modifier) {
+    val colors = AppColors.current
+    Text(
+        text = "已关注",
+        color = colors.pink,
+        fontSize = 10.sp,
+        fontWeight = FontWeight.Medium,
+        lineHeight = 12.sp,
+        maxLines = 1,
+        modifier = modifier
+            .background(colors.pinkSoft, RoundedCornerShape(3.dp))
+            .padding(horizontal = 4.dp, vertical = 1.dp),
+    )
+}
+
+@Composable
 fun VideoCard(
     video: Video,
     modifier: Modifier = Modifier,
     rank: Int? = null,
+    followed: Boolean = false,
     onClick: () -> Unit,
 ) {
     val colors = AppColors.current
@@ -130,6 +147,10 @@ fun VideoCard(
         )
         Spacer(Modifier.height(3.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
+            if (followed) {
+                FollowedTag()
+                Spacer(Modifier.width(4.dp))
+            }
             Text(
                 text = video.author,
                 style = MaterialTheme.typography.bodySmall,
@@ -153,6 +174,7 @@ fun VideoCard(
 fun VideoRow(
     video: Video,
     modifier: Modifier = Modifier,
+    followed: Boolean = false,
     onClick: () -> Unit,
 ) {
     val colors = AppColors.current
@@ -194,13 +216,19 @@ fun VideoRow(
                 lineHeight = 18.sp,
             )
             Spacer(Modifier.height(4.dp))
-            Text(
-                text = video.author,
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.text3,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (followed) {
+                    FollowedTag()
+                    Spacer(Modifier.width(4.dp))
+                }
+                Text(
+                    text = video.author,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.text3,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Spacer(Modifier.height(2.dp))
             Text(
                 text = "${countLabel(video.plays)}播放",

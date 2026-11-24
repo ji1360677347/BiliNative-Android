@@ -15,6 +15,7 @@ class HomeViewModel : ViewModel() {
     data class UiState(
         val tab: Int = 0,
         val items: List<Video> = emptyList(),
+        val followedMids: Set<Int> = emptySet(),
         val loading: Boolean = false,
         val refreshing: Boolean = false,
         val loadingMore: Boolean = false,
@@ -26,20 +27,53 @@ class HomeViewModel : ViewModel() {
     val state = _state.asStateFlow()
 
     private var job: Job? = null
+    private var followJob: Job? = null
     private var page = 1
 
     init {
         load(reset = true)
+        viewModelScope.launch {
+            BiliApp.store.personalCookieFlow
+                .collect { cookie ->
+                    if (cookie.isBlank()) {
+                        followJob?.cancel()
+                        _state.update { it.copy(followedMids = emptySet()) }
+                    } else {
+                        loadFollowedMids()
+                    }
+                }
+        }
     }
 
     fun selectTab(tab: Int) {
         if (tab == _state.value.tab) return
-        _state.value = UiState(tab = tab, loading = true)
+        _state.value = UiState(
+            tab = tab,
+            followedMids = _state.value.followedMids,
+            loading = true,
+        )
         page = 1
         load(reset = true)
     }
 
-    fun refresh() = load(reset = true)
+    fun refresh() {
+        load(reset = true)
+        loadFollowedMids()
+    }
+
+    private fun loadFollowedMids() {
+        if (BiliApp.store.personalCookie.isBlank()) {
+            _state.update { it.copy(followedMids = emptySet()) }
+            return
+        }
+        followJob?.cancel()
+        followJob = viewModelScope.launch {
+            val mids = BiliApp.client.followingMids()
+            if (mids != null) {
+                _state.update { it.copy(followedMids = mids) }
+            }
+        }
+    }
 
     fun retry() = load(reset = true)
 

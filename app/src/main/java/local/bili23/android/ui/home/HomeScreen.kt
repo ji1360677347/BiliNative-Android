@@ -121,6 +121,7 @@ fun HomeScreen(
                             VideoCard(
                                 video = video,
                                 rank = if (state.tab == 2) index + 1 else null,
+                                followed = video.authorId != null && video.authorId in state.followedMids,
                                 onClick = { onOpen(video) },
                             )
                         }
